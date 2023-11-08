@@ -6,3 +6,5 @@ sudo apt-get update
 sudo apt-get install k6
 sudo apt-get install wget
 wget https://raw.githubusercontent.com/Genaker/magento-k6-performance/main/magento.js
+echo "TEST GOOGLE.com"
+k6 run magento.js -e url=https://www.google.com/ -u 1 -i 10 --include-system-env-vars=false
