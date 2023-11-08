@@ -21,6 +21,10 @@ There have been reports of users being unable to download the key from Ubuntu's 
 ```
 wget -q -O - https://bintray.com/user/downloadSubjectPublicKey?username=bintray | sudo apt-key add -
 ```
+or just install script
+```
+bash install-ubuntu.sh
+```
 ## Red Hat/CentOS
 ```
 wget https://bintray.com/loadimpact/rpm/rpm -O bintray-loadimpact-rpm.repo
@@ -43,14 +47,14 @@ docker pull loadimpact/k6
 ```
 k6 run magento.js -e url=https://example.com -u 200 -i 6000 --include-system-env-vars=false
 ```
-where:
+Where:
 
 magento.js - script name  
--e url= site url to test as env varriable  
--e sleep=0.2 etc. add sleep after http response
--u virtual users / concurancy / threads  
+-e url= site URL to test as env variable  
+-e sleep=0.2 etc. add sleep after HTTP response
+-u virtual users / concurrency / threads  
 -i number of iteration  
---include-system-env-vars=false - don't include OS/system env varriables  
+--include-system-env-vars=false - don't include OS/system env variables  
 
 # Full K6 documentation
 
