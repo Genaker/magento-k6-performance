@@ -1,10 +1,14 @@
 import http from 'k6/http';
+import encoding from 'k6/encoding';
 import { sleep } from 'k6';
+
+const username = 'user';
+const password = 'password';
 
 export let options = {
   discardResponseBodies: true,
   insecureSkipTLSVerify: true,
-  summaryTrendStats: ['min' ,'med' ,'avg', 'max', 'p(95)']
+  summaryTrendStats: ['min', 'med', 'avg', 'max', 'p(95)']
 };
 
 export function setup(data) {
@@ -39,6 +43,16 @@ export function setup(data) {
 }
 
 export default function (data) {
+const credentials = `${username}:${password}`;
+
+// Alternatively, you can create the header yourself to authenticate
+// using HTTP Basic Auth
+const encodedCredentials = encoding.b64encode(credentials);
+const options = {
+    headers: {
+      Authorization: `Basic ${encodedCredentials}`,
+    },
+};
 
 // The order of precedence is: defaults < config file < exported script options < environment variables < command-line flags. 
 // Options from each subsequent level can be used to overwrite the options from the previous levels, with the CLI flags having the highest priority.
@@ -57,7 +71,7 @@ export default function (data) {
 
      let url = data.url + urlParam;
 
-     urls.push({'method': data.method,   'url': url, 'params': {discardResponseBodies: true} });
+     urls.push({'method': data.method,   'url': url, 'params': {discardResponseBodies: true,  headers: options.headers} });
      i++;
      sleep(data.sleep);
   }
