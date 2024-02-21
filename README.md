@@ -42,7 +42,7 @@ brew install k6
 docker pull loadimpact/k6
 ```
 
-# Usage with magento 
+# Usage with Magento 
 
 ```
 k6 run magento.js -e url=https://example.com -u 200 -i 6000 --include-system-env-vars=false
