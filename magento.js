@@ -31,7 +31,7 @@ export function setup() {
     separ: __ENV.URL.includes('?') ? '&' : '?',
     n: parseInt(__ENV.N) || 1,
     sleep: parseFloat(__ENV.SLEEP) || 0,
-    fpc_enabled: __ENV.FPC ? __ENV.FPC.toUpperCase() !== 'OFF' : false
+    fpc_enabled: __ENV.FPC ? __ENV.FPC.toUpperCase() === 'ON' : false
   };
 }
 
@@ -45,10 +45,10 @@ export default function (data) {
   if (__ENV.USERNAME && __ENV.PASSWORD) {
     headers.Authorization = `Basic ${encoding.b64encode(`${__ENV.USERNAME}:${__ENV.PASSWORD}`)}`;
   }
-
+  //console.log(`FPC Status: ${data.fpc_enabled ? 'ENABLED' : 'DISABLED'}`);
   const url = data.fpc_enabled ? data.url : `${data.url}${data.separ}fpc=${__VU}_${__ITER}_${Date.now()}`;
   const res = http.request(data.method, url, null, { headers: headers });
-  
+  //console.log(`FINAL URL: ${url}`);
   // Track metrics
   responseTimes.add(res.timings.duration);
   errorRate.add(res.status !== 200);
