@@ -31,7 +31,7 @@ export function setup() {
     separ: __ENV.URL.includes('?') ? '&' : '?',
     n: parseInt(__ENV.N) || 1,
     sleep: parseFloat(__ENV.SLEEP) || 0,
-    fpc: __ENV.FPC === 'ON'
+    fpc: __ENV.FPC ? __ENV.FPC.toUpperCase() !== 'OFF' : true
   };
 }
 
@@ -46,7 +46,10 @@ export default function (data) {
     headers.Authorization = `Basic ${encoding.b64encode(`${__ENV.USERNAME}:${__ENV.PASSWORD}`)}`;
   }
 
-  const res = http.request(data.method, data.url, null, { headers: headers });
+  const url = data.fpc ? data.url : `${data.url}${data.separ}fpc=${__VU}_${__ITER}_${Date.now()}`;
+  console.log(`Final URL: ${url}`);
+
+  const res = http.request(data.method, url, null, { headers: headers });
   
   // Track metrics
   responseTimes.add(res.timings.duration);
