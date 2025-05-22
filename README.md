@@ -6,6 +6,18 @@ k6 Magento 2 is a modern performance under load-testing tool when more than one 
 
 ## Installation
 
+```
+# Download ARM binary
+wget https://github.com/grafana/k6/releases/download/v0.50.0/k6-v0.50.0-linux-arm64.tar.gz
+
+# Extract
+tar -xvzf k6-v0.50.0-linux-arm64.tar.gz
+sudo mv k6-v0.50.0-linux-arm64/k6 /usr/local/bin/
+
+# Verify
+k6 version
+```
+
 ## Linux
 ## Debian/Ubuntu
 ```
