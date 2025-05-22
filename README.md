@@ -68,6 +68,133 @@ magento.js - script name
 -i number of iteration  
 --include-system-env-vars=false - don't include OS/system env variables  
 
+# Load Testing Guide
+
+## Installation
+```bash
+# Install k6
+sudo apt-get update && sudo apt-get install k6
+
+# Verify installation
+k6 version
+```
+
+## Basic Test Scenarios
+
+### 1. Quick Smoke Test
+```bash
+k6 run -e URL="http://yoursite.com/product/36" \
+  --vus 10 --duration 30s \
+  magento.js
+```
+
+### 2. Average Load Simulation
+```bash
+k6 run -e URL="http://yoursite.com/product/36" \
+  --vus 100 --duration 5m \
+  magento.js
+```
+
+### 3. Peak Load Stress Test
+```bash
+k6 run -e URL="http://yoursite.com/product/36" \
+  --vus 500 --duration 10m \
+  --rps 200 \
+  magento.js
+```
+
+## Advanced Scenarios
+
+### 4. Ramp-up Pattern
+```bash
+k6 run -e URL="http://yoursite.com/product/36" \
+  --stage 2m:200 --stage 5m:200 --stage 1m:0 \
+  magento.js
+```
+
+### 5. Spike Testing
+```bash
+k6 run -e URL="http://yoursite.com/product/36" \
+  --stage 30s:1000 --stage 1m:1000 --stage 30s:50 \
+  magento.js
+```
+
+## Configuration Options
+
+### Environment Variables
+| Variable    | Description                | Default     |
+|-------------|----------------------------|-------------|
+| `URL`       | Target endpoint            | Required    |
+| `METHOD`    | HTTP Method                | `GET`       |
+| `N`         | Iterations per VU          | `1`         |
+| `SLEEP`     | Delay between requests (s) | `0`         |
+| `FPC`       | Full Page Cache            | `OFF`       |
+| `USERNAME`  | Basic Auth username        | -           |
+| `PASSWORD`  | Basic Auth password        | -           |
+
+## Example Command with All Options
+```bash
+k6 run \
+  -e URL="http://yoursite.com/product/36" \
+  -e METHOD=GET \
+  -e N=5 \
+  -e SLEEP=0.5 \
+  -e FPC=ON \
+  -e USERNAME=test -e PASSWORD=test123 \
+  --vus 200 \
+  --duration 10m \
+  --rps 100 \
+  --out json=metrics.json \
+  magento.js
+```
+
+## Results Interpretation
+
+Key metrics to monitor:
+- **VUs**: Active virtual users
+- **iterations**: Completed requests
+- **http_req_duration**: Response times
+  - p(95): 95th percentile
+  - max: Maximum response time
+- **http_req_failed**: Error rate
+- **rps**: Requests per second
+
+## Generating Reports
+
+1. JSON output:
+```bash
+k6 run --out json=results.json magento.js
+```
+
+2. HTML report (requires k6-html-reporter):
+```bash
+k6 run --out json=results.json magento.js
+npx k6-html-reporter -i results.json -o report.html
+```
+
+## Best Practices
+
+1. Start with low VUs and gradually increase
+2. Monitor application metrics during tests
+3. Run tests from different locations
+4. Combine with cache busting (FPC=OFF)
+5. Test different endpoints simultaneously
+
+## Troubleshooting
+
+**Common Errors**:
+- `405 Method Not Allowed`: Ensure correct HTTP method case (UPPERCASE)
+- `429 Too Many Requests`: Reduce RPS/VUs
+- `500 Errors`: Check application logs
+
+**Debug Command**:
+```bash
+k6 run -e URL="http://yoursite.com/product/36" \
+  --http-debug=full \
+  --vus 1 --iterations 1 \
+  magento.js
+```
+
 # Full K6 documentation
 
 [https://k6.io/docs/](https://k6.io/docs/)
