@@ -245,9 +245,6 @@ k6 run -e URL="https://yoursite.com/product/36" \
 
 ### Key Performance Indicators
 
-
-### Key Performance Indicators
-
 Monitor these critical metrics during your tests:
 
 - **VUs (Virtual Users)**: Number of active concurrent users
@@ -303,8 +300,6 @@ k6 run --out influxdb=http://localhost:8086/k6 magento.js
 - ❌ Ignoring database and cache server load
 - ❌ Not monitoring error rates (200 OK doesn't mean quality)
 - ❌ Running tests during production hours
-
-## 🔧 Troubleshooting Common Issues
 
 ## 🔧 Troubleshooting Common Issues
 
