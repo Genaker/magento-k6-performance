@@ -281,8 +281,6 @@ k6 run --out influxdb=http://localhost:8086/k6 magento.js
 
 ## 🎓 Best Practices for Magento Performance Testing
 
-## 🎓 Best Practices for Magento Performance Testing
-
 ### Testing Strategy
 
 1. **Start Small, Scale Gradually**: Begin with 10-50 VUs, then increase incrementally
