@@ -56,7 +56,8 @@ test('default thresholds are the original single one', () => {
 });
 
 test('optional thresholds', () => {
-  const t = buildThresholds({ T_HIT: '500', T_MISS: '3000', MAX_ERROR_RATE: '0.01', MAX_MISMATCH: '0' });
+  const t = buildThresholds({ T_HIT: '500', T_MISS: '3000', MAX_ERROR_RATE: '0.01', MAX_MISMATCH: '0', MAX_API_ERROR_RATE: '0.02' });
+  assert.deepEqual(t.api_errors, ['rate<=0.02']);
   assert.deepEqual(t['response_times{cache:hit}'], ['p(95)<500']);
   assert.deepEqual(t['response_times{cache:miss}'], ['p(95)<3000']);
   assert.deepEqual(t.errors, ['rate<=0.01']);

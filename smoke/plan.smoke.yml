@@ -1,0 +1,36 @@
+# Smoke-test plan for smoke/mock-magento.js (same pages as scenarios.smoke.csv).
+# run.sh overrides the hosts with -e BASE_URL / -e API_BASE (the port can change).
+name: smoke plan
+sites:
+  magento:
+    base_url: http://127.0.0.1:18080        # platform defaults to the site name
+  headless:
+    base_url: http://127.0.0.1:18080
+    api_base: http://127.0.0.1:18080
+    platform: headless
+
+load: { mode: iterations, vus: 10, iterations: 1000 }
+thresholds: { max_error_rate: 0, max_api_error_rate: 0 }
+search_terms_file: search-terms.smoke.txt   # relative to this plan
+
+platforms:
+  magento:
+    calls:
+      "*":
+        - name: banner_ajax
+          url: /banner/ajax/load/?requesting_page_url={page_url}&sections=&_={ts}
+          headers: { X-Requested-With: XMLHttpRequest }
+          expect: '"store_id"'
+  headless:
+    calls:
+      search:
+        - { name: gql_search, url: "{api_base}/graphql?sort=asc&q={term}", expect: '"items":[{' }
+        - { name: gql_search_resort, url: "{api_base}/graphql?sort=desc&q={term}", expect: '"items":[{' }
+
+pages:
+  - { name: home, type: home, url: /, cache_hit: 95, traffic: 35, expect: page=/ }
+  - { name: category, type: category, url: /women.html, cache_hit: 90, traffic: 25, expect: page=/women.html }
+  - { name: product, type: product, url: /sample-product.html, cache_hit: 50, traffic: 20, expect: page=/sample-product.html }
+  - { name: search, type: search, url: { default: "/catalogsearch/result/?q={term}", headless: "/search?q={term}" }, cache_hit: 20, traffic: 10, expect: "term:{term}" }
+  - { name: cms, type: cms, url: /about-us, cache_hit: 100, traffic: 5, expect: page=/about-us }
+  - { name: cart, type: cart, url: /checkout/cart/, cache_hit: 0, traffic: 5 }

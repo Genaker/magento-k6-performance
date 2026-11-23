@@ -1,13 +1,14 @@
 {
   "name": "magento-k6-performance",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
-  "description": "k6 load testing toolkit for Magento 2 with Full Page Cache aware page mixes",
+  "description": "k6 load testing toolkit for Magento 2: YAML test plans, FPC-aware page mixes, Luma/Hyva/headless sub-requests",
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.js",
     "test:smoke": "bash smoke/run.sh",
-    "mock": "node smoke/mock-magento.js"
+    "mock": "node smoke/mock-magento.js",
+    "validate": "node tools/validate.js"
   },
   "engines": {
     "node": ">=20"

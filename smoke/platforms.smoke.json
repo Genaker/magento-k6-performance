@@ -1,0 +1,25 @@
+{
+  "_comment": "Smoke-test profile for smoke/mock-magento.js. Mirrors profiles/platforms.json: a Magento theme with an AJAX call on every page, and a headless storefront whose search grid comes from GraphQL (twice).",
+  "platforms": {
+    "magento": {
+      "calls": {
+        "*": [
+          {
+            "name": "banner_ajax",
+            "url": "/banner/ajax/load/?requesting_page_url={page_url}&sections=&_={ts}",
+            "headers": { "X-Requested-With": "XMLHttpRequest" },
+            "expect": "\"store_id\""
+          }
+        ]
+      }
+    },
+    "headless": {
+      "calls": {
+        "search": [
+          { "name": "gql_search", "url": "{api_base}/graphql?sort=asc&q={term}", "expect": "\"items\":[{" },
+          { "name": "gql_search_resort", "url": "{api_base}/graphql?sort=desc&q={term}", "expect": "\"items\":[{" }
+        ]
+      }
+    }
+  }
+}

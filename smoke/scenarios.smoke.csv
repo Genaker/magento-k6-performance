@@ -1,7 +1,7 @@
-name,url,cache_hit_pct,traffic_pct
-home,/,95,35
-category,/women.html,90,25
-product,/sample-product.html,50,20
-search,/catalogsearch/result/?q=shirt,20,10
-cms,/about-us,100,5
-cart,/checkout/cart/,0,5
+name,type,url,url_headless,cache_hit_pct,traffic_pct,expect
+home,home,/,,95,35,page=/
+category,category,/women.html,,90,25,page=/women.html
+product,product,/sample-product.html,,50,20,page=/sample-product.html
+search,search,/catalogsearch/result/?q={term},/search?q={term},20,10,term:{term}
+cms,cms,/about-us,,100,5,page=/about-us
+cart,cart,/checkout/cart/,,0,5,

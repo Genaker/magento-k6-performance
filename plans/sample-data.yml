@@ -1,0 +1,118 @@
+# Magento sample data storefront mix - same pages on Luma, Hyvä and Flux.
+# Run:  k6 run magento.js -e PLAN=plans/sample-data.yml -e SITE=flux
+# Before a load test, check every page returns data:
+#       npm run validate -- --plan plans/sample-data.yml --site flux --all-terms
+# Point it at your hosts with -e BASE_URL=/API_BASE= or -e SITES=<your sites.yml>.
+name: Magento sample data mix
+description: Home 10%, 16 categories 32%, 16 products 32%, search 20%, CMS 2%, cart 3%, checkout 1%.
+
+sites:                       # pick one with -e SITE=<name>; platform defaults to the site name
+  luma:
+    base_url: https://luma.example.com
+    platform: luma
+  hyva:
+    base_url: https://hyva.example.com
+    platform: hyva
+  flux:
+    base_url: https://flux.example.com
+    api_base: https://flux-api.example.com   # Magento GraphQL host the Flux browser calls
+    platform: flux
+
+load:                        # same as the -e options (MODE, VUS, ...); -e wins
+  mode: rps                  # vus | rps | iterations
+  rps: 20
+  duration: 5m
+  sleep: 0
+
+thresholds:                  # breaking one fails the run (non-zero exit code)
+  t_p95: 3000                # p95 of all page responses, ms
+  t_hit: 800                 # p95 of planned cache hits, ms
+  t_miss: 4000               # p95 of planned cache misses (full render), ms
+  max_error_rate: 0.01       # page errors incl. missing expected content
+  max_api_error_rate: 0.01   # browser sub-request errors
+
+options:
+  debug_header: true         # send X-Magento-Debug: 1 to read X-Magento-Cache-Debug
+
+search_terms_file: ../scenarios/search-terms.txt   # path relative to this plan
+
+# Requests the browser makes after the page, per page type ("*" = every type).
+# Captured from real guest sessions. A planned cache miss busts these too.
+platforms:
+  luma:                      # Magento Commerce Luma: dynamic banners on every page (uncached PHP)
+    calls:
+      "*":
+        - name: banner_ajax
+          url: /banner/ajax/load/?requesting_page_url={page_url}&sections=&_={ts}
+          headers: { X-Requested-With: XMLHttpRequest }
+          expect: '"store_id"'
+      search:
+        - name: search_terms_log
+          url: /catalogsearch/searchTermsLog/save/?q={term}&_={ts}
+          headers: { X-Requested-With: XMLHttpRequest }
+  hyva:                      # Hyvä: no XHR for a guest without a session/cart
+    calls: {}
+  flux:                      # Flux (Next.js): pages are server-rendered; the search grid comes
+    calls:                   # from Magento GraphQL in the browser - twice (sort ASC, then DESC)
+      search:
+        - name: gql_search_products
+          url: "{api_base}/graphql?query=query+getProductsList%28%24search%3A+String%2C+%24filters%3A+ProductAttributeFilterInput%2C+%24pageSize%3A+Int%2C+%24currentPage%3A+Int%2C+%24sort%3A+ProductAttributeSortInput%29+%7B+products%28+search%3A+%24search+pageSize%3A+%24pageSize+currentPage%3A+%24currentPage+filter%3A+%24filters+sort%3A+%24sort+%29+%7B+total_count+aggregations%28filter%3A+%7Bcategory%3A+%7BincludeDirectChildrenOnly%3A+true%7D%7D%29+%7B+position+attribute_code+count+label+options+%7B+label+count+value+__typename+%7D+__typename+%7D+sort_fields+%7B+default+options+%7B+label+value+__typename+%7D+__typename+%7D+suggestions+%7B+search+__typename+%7D+category_block+%7B+content_json+__typename+%7D+items+%7B+uid+id+sku+name+url_key+url_suffix+stock_status+short_description+%7B+html+__typename+%7D+rating_summary+review_count+ba_product_flags+%7B+value+label+__typename+%7D+small_image+%7B+...ProductSmallImageFragment+__typename+%7D+price_range+%7B+...ProductPriceFragment+__typename+%7D+price_tiers+%7B+...ProductTiersPriceFragment+__typename+%7D+...+on+ConfigurableProduct+%7B+...ConfigurableProductVariantsFragment+__typename+%7D+__typename+%7D+page_info+%7B+current_page+page_size+__typename+%7D+__typename+%7D+__typename+%7D+fragment+ProductSmallImageFragment+on+ProductImage+%7B+url+label+url_resized%28+sizes%3A+%5B%7Buid%3A+%22common%22%2C+width%3A+312%2C+height%3A+272%7D%2C+%7Buid%3A+%22thumbnail%22%2C+width%3A+100%2C+height%3A+74%7D%5D+%29+%7B+uid+url+width+height+__typename+%7D+__typename+%7D+fragment+ProductGalleryImageFragment+on+ProductImage+%7B+url_resized%28+sizes%3A+%5B%7Buid%3A+%22common%22%2C+width%3A+871%2C+height%3A+650%7D%2C+%7Buid%3A+%22thumbnail%22%2C+width%3A+100%2C+height%3A+74%7D%5D+%29+%7B+uid+url+width+height+__typename+%7D+url+label+position+disabled+__typename+%7D+fragment+ProductGalleryVideoFragment+on+ProductVideo+%7B+url_resized%28+sizes%3A+%5B%7Buid%3A+%22common%22%2C+width%3A+871%2C+height%3A+650%7D%2C+%7Buid%3A+%22thumbnail%22%2C+width%3A+100%2C+height%3A+74%7D%5D+%29+%7B+uid+url+width+height+__typename+%7D+url+label+position+video_content+%7B+media_type+video_provider+video_url+video_title+video_description+video_metadata+__typename+%7D+disabled+__typename+%7D+fragment+ProductPriceFragment+on+PriceRange+%7B+minimum_price+%7B+regular_price+%7B+value+currency+__typename+%7D+final_price+%7B+value+currency+__typename+%7D+__typename+%7D+maximum_price+%7B+regular_price+%7B+value+currency+__typename+%7D+final_price+%7B+value+currency+__typename+%7D+__typename+%7D+__typename+%7D+fragment+ProductTiersPriceFragment+on+TierPrice+%7B+quantity+final_price+%7B+value+currency+__typename+%7D+discount+%7B+amount_off+percent_off+__typename+%7D+__typename+%7D+fragment+ConfigurableProductVariantsFragment+on+ConfigurableProduct+%7B+configurable_options+%7B+uid+attribute_uid+attribute_id+attribute_code+position+attribute_catalog_input_type+label+values+%7B+uid+label+value_index+use_default_value+swatch_data+%7B+__typename+value+%7D+__typename+%7D+__typename+%7D+variants+%7B+attributes+%7B+uid+code+value_index+label+__typename+%7D+product+%7B+uid+sku+stock_status+staged+rating_summary+review_count+small_image+%7B+...ProductSmallImageFragment+__typename+%7D+media_gallery+%7B+...ProductGalleryImageFragment+...ProductGalleryVideoFragment+__typename+%7D+price_range+%7B+...ProductPriceFragment+__typename+%7D+price_tiers+%7B+...ProductTiersPriceFragment+__typename+%7D+__typename+%7D+__typename+%7D+__typename+%7D&variables=%7B%22filters%22%3A%7B%7D%2C%22pageSize%22%3A10%2C%22currentPage%22%3A1%2C%22sort%22%3A%7B%22position%22%3A%22ASC%22%7D%2C%22search%22%3A%22{term}%22%7D"
+          expect: '"items":[{'
+        - name: gql_search_products_resort
+          url: "{api_base}/graphql?query=query+getProductsList%28%24search%3A+String%2C+%24filters%3A+ProductAttributeFilterInput%2C+%24pageSize%3A+Int%2C+%24currentPage%3A+Int%2C+%24sort%3A+ProductAttributeSortInput%29+%7B+products%28+search%3A+%24search+pageSize%3A+%24pageSize+currentPage%3A+%24currentPage+filter%3A+%24filters+sort%3A+%24sort+%29+%7B+total_count+aggregations%28filter%3A+%7Bcategory%3A+%7BincludeDirectChildrenOnly%3A+true%7D%7D%29+%7B+position+attribute_code+count+label+options+%7B+label+count+value+__typename+%7D+__typename+%7D+sort_fields+%7B+default+options+%7B+label+value+__typename+%7D+__typename+%7D+suggestions+%7B+search+__typename+%7D+category_block+%7B+content_json+__typename+%7D+items+%7B+uid+id+sku+name+url_key+url_suffix+stock_status+short_description+%7B+html+__typename+%7D+rating_summary+review_count+ba_product_flags+%7B+value+label+__typename+%7D+small_image+%7B+...ProductSmallImageFragment+__typename+%7D+price_range+%7B+...ProductPriceFragment+__typename+%7D+price_tiers+%7B+...ProductTiersPriceFragment+__typename+%7D+...+on+ConfigurableProduct+%7B+...ConfigurableProductVariantsFragment+__typename+%7D+__typename+%7D+page_info+%7B+current_page+page_size+__typename+%7D+__typename+%7D+__typename+%7D+fragment+ProductSmallImageFragment+on+ProductImage+%7B+url+label+url_resized%28+sizes%3A+%5B%7Buid%3A+%22common%22%2C+width%3A+312%2C+height%3A+272%7D%2C+%7Buid%3A+%22thumbnail%22%2C+width%3A+100%2C+height%3A+74%7D%5D+%29+%7B+uid+url+width+height+__typename+%7D+__typename+%7D+fragment+ProductGalleryImageFragment+on+ProductImage+%7B+url_resized%28+sizes%3A+%5B%7Buid%3A+%22common%22%2C+width%3A+871%2C+height%3A+650%7D%2C+%7Buid%3A+%22thumbnail%22%2C+width%3A+100%2C+height%3A+74%7D%5D+%29+%7B+uid+url+width+height+__typename+%7D+url+label+position+disabled+__typename+%7D+fragment+ProductGalleryVideoFragment+on+ProductVideo+%7B+url_resized%28+sizes%3A+%5B%7Buid%3A+%22common%22%2C+width%3A+871%2C+height%3A+650%7D%2C+%7Buid%3A+%22thumbnail%22%2C+width%3A+100%2C+height%3A+74%7D%5D+%29+%7B+uid+url+width+height+__typename+%7D+url+label+position+video_content+%7B+media_type+video_provider+video_url+video_title+video_description+video_metadata+__typename+%7D+disabled+__typename+%7D+fragment+ProductPriceFragment+on+PriceRange+%7B+minimum_price+%7B+regular_price+%7B+value+currency+__typename+%7D+final_price+%7B+value+currency+__typename+%7D+__typename+%7D+maximum_price+%7B+regular_price+%7B+value+currency+__typename+%7D+final_price+%7B+value+currency+__typename+%7D+__typename+%7D+__typename+%7D+fragment+ProductTiersPriceFragment+on+TierPrice+%7B+quantity+final_price+%7B+value+currency+__typename+%7D+discount+%7B+amount_off+percent_off+__typename+%7D+__typename+%7D+fragment+ConfigurableProductVariantsFragment+on+ConfigurableProduct+%7B+configurable_options+%7B+uid+attribute_uid+attribute_id+attribute_code+position+attribute_catalog_input_type+label+values+%7B+uid+label+value_index+use_default_value+swatch_data+%7B+__typename+value+%7D+__typename+%7D+__typename+%7D+variants+%7B+attributes+%7B+uid+code+value_index+label+__typename+%7D+product+%7B+uid+sku+stock_status+staged+rating_summary+review_count+small_image+%7B+...ProductSmallImageFragment+__typename+%7D+media_gallery+%7B+...ProductGalleryImageFragment+...ProductGalleryVideoFragment+__typename+%7D+price_range+%7B+...ProductPriceFragment+__typename+%7D+price_tiers+%7B+...ProductTiersPriceFragment+__typename+%7D+__typename+%7D+__typename+%7D+__typename+%7D&variables=%7B%22filters%22%3A%7B%7D%2C%22pageSize%22%3A10%2C%22currentPage%22%3A1%2C%22sort%22%3A%7B%22position%22%3A%22DESC%22%7D%2C%22search%22%3A%22{term}%22%7D"
+          expect: '"items":[{'
+
+# name, type, url (or { default, <platform>: override }), cache_hit %, traffic %, expect
+# expect = text the response must contain, else it counts as an error.
+pages:
+  # --- Home ---
+  - { name: home, type: home, url: /, cache_hit: 95, traffic: 10, expect: { luma: Hero Hoodie, hyva: Juno Jacket, flux: Tiberius Gym Tank } }
+
+  # --- Categories: 3 landing pages + 13 listings (expect = a product listed on page 1) ---
+  - { name: cat_women, type: category, url: /women.html, cache_hit: 95, traffic: 2, expect: Women }
+  - { name: cat_men, type: category, url: /men.html, cache_hit: 95, traffic: 2, expect: Men }
+  - { name: cat_gear, type: category, url: /gear.html, cache_hit: 95, traffic: 2, expect: Gear }
+  - { name: cat_women_tops, type: category, url: /women/tops-women.html, cache_hit: 85, traffic: 2, expect: Breathe-Easy Tank }
+  - { name: cat_women_jackets, type: category, url: /women/tops-women/jackets-women.html, cache_hit: 85, traffic: 2, expect: Olivia 1/4 Zip Light Jacket }
+  - { name: cat_women_hoodies, type: category, url: /women/tops-women/hoodies-and-sweatshirts-women.html, cache_hit: 85, traffic: 2, expect: Circe Hooded Ice Fleece }
+  - { name: cat_women_tees, type: category, url: /women/tops-women/tees-women.html, cache_hit: 85, traffic: 2, expect: Desiree Fitness Tee }
+  - { name: cat_women_pants, type: category, url: /women/bottoms-women/pants-women.html, cache_hit: 85, traffic: 2, expect: Portia Capri }
+  - { name: cat_women_shorts, type: category, url: /women/bottoms-women/shorts-women.html, cache_hit: 85, traffic: 2, expect: Erika Running Short }
+  - { name: cat_men_hoodies, type: category, url: /men/tops-men/hoodies-and-sweatshirts-men.html, cache_hit: 85, traffic: 2, expect: Marco Lightweight Active Hoodie }
+  - { name: cat_men_jackets, type: category, url: /men/tops-men/jackets-men.html, cache_hit: 85, traffic: 2, expect: Proteus Fitness Jackshirt }
+  - { name: cat_men_tees, type: category, url: /men/tops-men/tees-men.html, cache_hit: 85, traffic: 2, expect: Strike Endurance Tee }
+  - { name: cat_men_bottoms, type: category, url: /men/bottoms-men.html, cache_hit: 85, traffic: 2, expect: Cronus Yoga Pant }
+  - { name: cat_gear_bags, type: category, url: /gear/bags.html, cache_hit: 85, traffic: 2, expect: Rival Field Messenger }
+  - { name: cat_gear_watches, type: category, url: /gear/watches.html, cache_hit: 85, traffic: 2, expect: Aim Analog Watch }
+  - { name: cat_yoga_new, type: category, url: /collections/yoga-new.html, cache_hit: 85, traffic: 2, expect: Echo Fit Compression Short }
+
+  # --- Products: configurable, simple, bundle (sprite kit), grouped (sprite straps) ---
+  - { name: pdp_hero_hoodie, type: product, url: /hero-hoodie.html, cache_hit: 80, traffic: 2, expect: Hero Hoodie }
+  - { name: pdp_radiant_tee, type: product, url: /radiant-tee.html, cache_hit: 80, traffic: 2, expect: Radiant Tee }
+  - { name: pdp_juno_jacket, type: product, url: /juno-jacket.html, cache_hit: 80, traffic: 2, expect: Juno Jacket }
+  - { name: pdp_breathe_easy_tank, type: product, url: /breathe-easy-tank.html, cache_hit: 80, traffic: 2, expect: Breathe-Easy Tank }
+  - { name: pdp_marco_hoodie, type: product, url: /marco-lightweight-active-hoodie.html, cache_hit: 80, traffic: 2, expect: Marco Lightweight Active Hoodie }
+  - { name: pdp_cronus_yoga_pant, type: product, url: /cronus-yoga-pant.html, cache_hit: 80, traffic: 2, expect: Cronus Yoga Pant }
+  - { name: pdp_erika_running_short, type: product, url: /erika-running-short.html, cache_hit: 80, traffic: 2, expect: Erika Running Short }
+  - { name: pdp_olivia_jacket, type: product, url: /olivia-1-4-zip-light-jacket.html, cache_hit: 80, traffic: 2, expect: Olivia 1/4 Zip Light Jacket }
+  - { name: pdp_portia_capri, type: product, url: /portia-capri.html, cache_hit: 80, traffic: 2, expect: Portia Capri }
+  - { name: pdp_fusion_backpack, type: product, url: /fusion-backpack.html, cache_hit: 80, traffic: 2, expect: Fusion Backpack }
+  - { name: pdp_push_it_bag, type: product, url: /push-it-messenger-bag.html, cache_hit: 80, traffic: 2, expect: Push It Messenger Bag }
+  - { name: pdp_rival_messenger, type: product, url: /rival-field-messenger.html, cache_hit: 80, traffic: 2, expect: Rival Field Messenger }
+  - { name: pdp_aim_watch, type: product, url: /aim-analog-watch.html, cache_hit: 80, traffic: 2, expect: Aim Analog Watch }
+  - { name: pdp_cardio_ball, type: product, url: /dual-handle-cardio-ball.html, cache_hit: 80, traffic: 2, expect: Dual Handle Cardio Ball }
+  - { name: pdp_sprite_kit_bundle, type: product, url: /sprite-yoga-companion-kit.html, cache_hit: 80, traffic: 2, expect: Sprite Yoga Companion Kit }
+  - { name: pdp_sprite_straps_grouped, type: product, url: /set-of-sprite-yoga-straps.html, cache_hit: 80, traffic: 2, expect: Set of Sprite Yoga Straps }
+
+  # --- Search: {term} from search_terms_file. Flux renders results in the browser (see platforms.flux) ---
+  - { name: search, type: search, url: { default: "/catalogsearch/result/?q={term}", flux: "/catalog/product_search?search={term}" }, cache_hit: 60, traffic: 20, expect: { default: price-box price-final_price, flux: Search results for } }
+
+  # --- CMS ---
+  - { name: cms_about_us, type: cms, url: /about-us, cache_hit: 95, traffic: 0.5, expect: About us }
+  - { name: cms_customer_service, type: cms, url: /customer-service, cache_hit: 0, traffic: 0.5, expect: Customer Service }
+  - { name: cms_privacy, type: cms, url: /privacy-policy-cookie-restriction-mode, cache_hit: 95, traffic: 0.5, expect: Privacy Policy }
+  - { name: cms_enable_cookies, type: cms, url: /enable-cookies, cache_hit: 95, traffic: 0.5, expect: Enable Cookies }
+
+  # --- Cart and checkout: opened as a guest with an empty cart (no add-to-cart flow) ---
+  - { name: cart, type: cart, url: /checkout/cart, cache_hit: 0, traffic: 3, expect: no items }
+  - { name: checkout, type: checkout, url: /checkout, cache_hit: 0, traffic: 1, expect: no items }

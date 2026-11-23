@@ -33,9 +33,18 @@ test('csv mode', () => {
   assert.equal(c.baseUrl, 'https://shop.test');
 });
 
-test('requires exactly one of URL or CSV', () => {
+test('requires exactly one of URL, CSV or PLAN', () => {
   assert.throws(() => parseConfig({}), /Missing target/);
-  assert.throws(() => parseConfig({ URL, CSV: 'x.csv' }), /either URL .* or CSV/);
+  assert.throws(() => parseConfig({ URL, CSV: 'x.csv' }), /only one of URL/);
+  assert.throws(() => parseConfig({ CSV: 'x.csv', PLAN: 'p.yml' }), /only one of URL/);
+});
+
+test('plan mode', () => {
+  const c = parseConfig({ PLAN: 'plans/p.yml', SITE: 'flux', BASE_URL: 'https://flux.test', PLATFORM: 'flux' });
+  assert.equal(c.mode, 'plan');
+  assert.equal(c.plan, 'plans/p.yml');
+  assert.equal(c.site, 'flux');
+  assert.throws(() => parseConfig({ PLAN: 'p.yml', PLATFORM: 'flux', PROFILE: 'x.json' }), /PROFILE is for CSV mode/);
 });
 
 test('URL must be http(s)', () => {
@@ -78,9 +87,24 @@ test('DEBUG_HEADER defaults on and can be turned off', () => {
   assert.equal(parseConfig({ URL, DEBUG_HEADER: 'true' }).debugHeader, true);
 });
 
+test('platform options', () => {
+  const c = parseConfig({ CSV: 'x.csv', PLATFORM: 'flux', PROFILE: 'p.json', TERMS: 't.txt', API_BASE: 'https://api.test' });
+  assert.equal(c.platform, 'flux');
+  assert.equal(c.profile, 'p.json');
+  assert.equal(c.terms, 't.txt');
+  assert.equal(c.apiBase, 'https://api.test');
+  assert.equal(parseConfig({ URL }).platform, undefined);
+});
+
+test('PROFILE needs PLATFORM; PLATFORM must be a simple word', () => {
+  assert.throws(() => parseConfig({ CSV: 'x.csv', PROFILE: 'p.json' }), /PROFILE needs -e PLATFORM/);
+  assert.throws(() => parseConfig({ CSV: 'x.csv', PLATFORM: 'Luma Theme' }), /PLATFORM must be/);
+  assert.doesNotThrow(() => parseConfig({ CSV: 'x.csv', PLATFORM: 'luma' })); // overrides only, no profile
+});
+
 test('singleScenario maps FPC to a 100% / 0% cache-hit row', () => {
   const on = singleScenario(parseConfig({ URL, FPC: 'ON' }));
-  assert.deepEqual(on, [{ name: URL, url: URL, cacheHit: 100, traffic: 100, share: 1, cum: 1 }]);
+  assert.deepEqual(on, [{ name: URL, type: 'page', url: URL, expect: '', cacheHit: 100, traffic: 100, share: 1, cum: 1 }]);
   const off = singleScenario(parseConfig({ URL }));
   assert.equal(off[0].cacheHit, 0);
 });

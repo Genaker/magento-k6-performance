@@ -56,12 +56,13 @@ docker pull loadimpact/k6
 
 # Usage with Magento
 
-One script, `magento.js`, two modes:
+One script, `magento.js`, three modes:
 
 | Mode | Turn it on with | What it does |
 |---|---|---|
-| **Single page** | `-e URL=https://site/page.html` | Hits one URL. `FPC=OFF` (default) busts the Full Page Cache on every request; `FPC=ON` lets the cache serve it. |
+| **Test plan** (recommended) | `-e PLAN=plans/sample-data.yml -e SITE=flux` | One YAML file: sites, load, thresholds, the requests each storefront's browser makes after a page, and the page mix. See [Test plans](#test-plans-yaml). |
 | **Page mix** | `-e CSV=scenarios.csv` | Picks pages by traffic share; for every request decides cache hit vs forced miss from that page's hit ratio. |
+| **Single page** | `-e URL=https://site/page.html` | Hits one URL. `FPC=OFF` (default) busts the Full Page Cache on every request; `FPC=ON` lets the cache serve it. |
 
 ```
 k6 run magento.js -e URL=https://example.com -u 200 -i 6000 --include-system-env-vars=false
@@ -85,6 +86,121 @@ Every response is also checked for whether it **really** came from cache: `X-Mag
 
 > Busting fills Varnish with one-off objects. On long runs against production, watch Varnish memory / `n_lru_nuked`, or use a lower miss share.
 
+# Test plans (YAML)
+
+A plan describes a whole load test in one file. [`plans/sample-data.yml`](plans/sample-data.yml) is a ready-made plan for any store with **Magento sample data**: the same 40 pages on a **Luma**, **Hyvä** or **Flux** (headless Next.js) storefront.
+
+```bash
+# 1. check every page returns data on your site (one request each, no load)
+npm run validate -- --plan plans/sample-data.yml --site flux
+
+# 2. run the load test
+k6 run magento.js -e PLAN=plans/sample-data.yml -e SITE=flux
+```
+
+```yaml
+name: Magento sample data mix
+
+sites:                          # pick one with -e SITE=<name>
+  luma: { base_url: https://luma.example.com, platform: luma }
+  flux:
+    base_url: https://flux.example.com
+    api_base: https://flux-api.example.com   # GraphQL host the browser calls ({api_base})
+    platform: flux              # which "platforms" section applies (defaults to the site name)
+
+load:       { mode: rps, rps: 20, duration: 5m, sleep: 0 }      # same as MODE, RPS, ... below
+thresholds: { t_p95: 3000, t_hit: 800, t_miss: 4000, max_error_rate: 0.01, max_api_error_rate: 0.01 }
+options:    { debug_header: true }                              # method, bust_key, fresh_session, verbose
+search_terms_file: ../scenarios/search-terms.txt                # or: search_terms: [bag, yoga mat]
+
+platforms:                      # requests the browser makes AFTER the page, per page type
+  luma:
+    calls:
+      "*":                      # every page type
+        - name: banner_ajax
+          url: /banner/ajax/load/?requesting_page_url={page_url}&sections=&_={ts}
+          headers: { X-Requested-With: XMLHttpRequest }
+          expect: '"store_id"'
+  flux:
+    calls:
+      search:
+        - { name: gql_search_products, url: "{api_base}/graphql?query=...{term}...", expect: '"items":[{' }
+
+pages:
+  - { name: home, type: home, url: /, cache_hit: 95, traffic: 10, expect: { luma: Hero Hoodie, flux: Tiberius Gym Tank } }
+  - { name: pdp_hero_hoodie, type: product, url: /hero-hoodie.html, cache_hit: 80, traffic: 2, expect: Hero Hoodie }
+  - name: search
+    type: search
+    url: { default: "/catalogsearch/result/?q={term}", flux: "/catalog/product_search?search={term}" }
+    cache_hit: 60
+    traffic: 20
+    expect: { default: price-box price-final_price, flux: Search results for }
+```
+
+### Page fields
+
+| Field | Meaning |
+|---|---|
+| `name` | Unique label; every metric is tagged with it. |
+| `type` | Page type (`home`, `category`, `product`, `search`, `cms`, `cart`, `checkout`, ...). Picks the platform's sub-requests and tags metrics, so results can be split per page type. |
+| `url` | Path (joined with the site's `base_url`) or absolute URL. Text, or a mapping `{ default: ..., <platform>: ... }` when a storefront uses a different route. `"-"` skips the page on that platform. May use `{term}`. |
+| `cache_hit` | 0–100: share of requests sent as the bare URL (cache hit); the rest are busted (forced miss). Use `0` for pages that are never cached (cart, checkout, customer pages). |
+| `traffic` | Relative share of all traffic (normalized; `0` switches the page off). |
+| `expect` | Text the response must contain (text or per-platform mapping, may use `{term}`). A 200 without it counts as an **error**: catches error pages, empty listings and maintenance pages that still return 200. |
+
+### Sub-requests (`platforms`)
+
+A real page view is more than the HTML. Each storefront's browser calls the backend again after the page loads, and that load is very different per platform. `platforms.<name>.calls.<page type>` lists those requests (`"*"` = every type). They run right after the page, in parallel like browser XHRs (`http.batch`), and are reported separately (`api_*` metrics). Placeholders: `{term}`, `{page_url}` (the page URL actually requested), `{ts}` (timestamp, like jQuery's `_=`), `{api_base}`, `{base_url}`. Each call can have `headers` and an `expect`.
+
+**A planned cache miss busts the page and its sub-requests**, so a cold page view is cold end to end.
+
+### Settings and precedence
+
+`load`, `thresholds` and `options` use the same names as the `-e` options below (lowercase). Anything passed with `-e` wins over the plan, e.g. `-e RPS=50` or `-e BASE_URL=https://staging.example.com`.
+
+Keep private hosts out of the shared plan with a sites file:
+
+```yaml
+# plans/local/my-sites.yml  (plans/local/ is git-ignored)
+sites:
+  flux: { base_url: https://flux-test.mycompany.com, api_base: https://flux-api-test.mycompany.com, platform: flux }
+```
+```bash
+k6 run magento.js -e PLAN=plans/sample-data.yml -e SITES=plans/local/my-sites.yml -e SITE=flux
+```
+
+Unknown keys stop the run with a clear message (a typo like `cache_hits:` is never silently ignored). JSON plans work too.
+
+## Validate before you load test
+
+`npm run validate` sends each page **once as a cache hit and once busted**, plus that platform's sub-requests, and checks every status and `expect` text, using the same code k6 uses (no k6 needed). Run it after editing a plan or before pointing a test at a new environment:
+
+```bash
+npm run validate -- --plan plans/sample-data.yml --site luma                  # every page, hit + miss
+npm run validate -- --plan plans/sample-data.yml --site flux --all-terms      # + every search term
+npm run validate -- --plan plans/sample-data.yml --sites plans/local/my-sites.yml --site hyva
+```
+```
+  ok   pdp_hero_hoodie hit       200 446ms  +1 call(s) ok
+  FAIL home hit                  200 1175ms  +1 call(s) FAILED: banner_ajax 400 425ms
+80/80 page views ok
+```
+
+## Comparing Luma, Hyvä and Flux
+
+What a guest browser requests per page view on Magento sample data (captured in a fresh incognito session). These are already in `plans/sample-data.yml`:
+
+| Storefront | After every page | After a search page |
+|---|---|---|
+| **Luma** (Magento Commerce) | `GET /banner/ajax/load/` (dynamic blocks; uncached PHP; answers **400** without `X-Requested-With: XMLHttpRequest`) | `GET /catalogsearch/searchTermsLog/save/?q=` |
+| **Hyvä** | nothing | nothing |
+| **Flux** (Next.js) | nothing: the page is server-rendered | Search results are **not** in the HTML. The browser fetches them from Magento GraphQL (`GET`, cacheable), **twice**: `getProductsList` sorted `position ASC`, then `DESC` |
+
+Notes for reading results:
+- On Flux, category, product and CMS pages carry their data in the server-rendered HTML, so k6 loads the backend the same way a browser does. Search is the exception, which is why the plan adds the GraphQL calls. Without them, Flux search would look much cheaper than it is.
+- The double Flux search request comes from Flux's `SearchProductsProvider`. Its fetch effect runs with the default sort, then the "new search term" effect switches to the search sort and triggers a second fetch. The first result is thrown away. Fixing it in Flux halves search GraphQL load; then remove `gql_search_products_resort` from the plan.
+- `cache_hit` on Flux: Flux pages come back with `Cache-Control: private, no-store` and no full-page cache in front, so Next.js renders every page request anyway and `?fpc=` changes nothing for pages. It only busts the GraphQL search calls (Varnish keys on the full URL). Flux sends no cache-debug header either, so `cache_actual_hit` stays at 0 there. Compare Flux by response times, not by the hit-ratio metrics.
+
 # Page mix from a CSV
 
 `scenarios.csv` — one row per page:
@@ -104,6 +220,8 @@ cart,https://example.com/checkout/cart/,0,3
 | `url` | Absolute `https://…`, or a path like `/women.html` combined with `-e BASE_URL=https://example.com` (one CSV for staging and production). |
 | `cache_hit_pct` | 0–100. Share of this page's requests sent as the bare URL (cache hit). The rest are busted. `0` = always miss, `100` = never bust. |
 | `traffic_pct` | Relative share of all traffic. Doesn't need to sum to 100 (it is normalized). `0` switches the row off. |
+
+Optional columns (same meaning as the plan fields above): `type`, `expect`, and per-platform overrides `url_<platform>` / `expect_<platform>`, used with `-e PLATFORM=<platform>`. Sub-requests come from `-e PROFILE=<file>.json` (`{"platforms": {...}}`, same shape as a plan's `platforms`), and `{term}` from `-e TERMS=<file>` (one term per line).
 
 Lines starting with `#` are comments. A bad row stops the run with its line number (non-numeric value, `cache_hit_pct` outside 0–100, duplicate `name`, relative URL without `BASE_URL`, ...).
 
@@ -169,14 +287,21 @@ k6 run -e URL="http://yoursite.com/product/36" \
 
 ## Options
 
-All are `-e NAME=value`; names are case-insensitive (`-e url=` = `-e URL=`).
+All are `-e NAME=value`; names are case-insensitive (`-e url=` = `-e URL=`). In a plan, `load` / `thresholds` / `options` take the same names in lowercase; `-e` always wins. File paths are relative to `magento.js` (the repo root); `search_terms_file` inside a plan is relative to the plan.
 
 ### Target and requests
 | Variable | Description | Default |
 |---|---|---|
-| `URL` | Single-page mode: target URL | – |
+| `PLAN` | Test-plan mode: path to a YAML (or JSON) plan | – |
+| `SITE` | Which of the plan's `sites` to test (optional when it has one) | – |
+| `SITES` | Sites file that replaces the plan's `sites` (keep private hosts out of the plan) | – |
 | `CSV` | Page-mix mode: path to the scenario CSV | – |
-| `BASE_URL` | Prefix for relative CSV urls (`/women.html`) | – |
+| `URL` | Single-page mode: target URL | – |
+| `BASE_URL` | Prefix for relative urls (`/women.html`); overrides the plan site's `base_url` | – |
+| `API_BASE` | Value of `{api_base}` in sub-requests (e.g. the GraphQL host); overrides the site's `api_base` | – |
+| `PLATFORM` | Platform for `url_<platform>`/`expect_<platform>` columns and `PROFILE` sections (a plan sets it from the site) | – |
+| `PROFILE` | CSV mode: JSON with per-platform sub-requests (`{"platforms": {...}}`) | – |
+| `TERMS` | Search-terms file for `{term}` (one per line); overrides the plan's terms | – |
 | `METHOD` | HTTP method | `GET` |
 | `N` | Requests per VU iteration | `1` |
 | `SLEEP` | Pause after each request (s) | `0` |
@@ -203,7 +328,8 @@ All are `-e NAME=value`; names are case-insensitive (`-e url=` = `-e URL=`).
 |---|---|---|
 | `T_P95` | p95 of all `response_times` (ms) | `10000` |
 | `T_HIT` / `T_MISS` | p95 for cache hits / misses (ms) | off |
-| `MAX_ERROR_RATE` | Max share of failed requests (0–1) | off |
+| `MAX_ERROR_RATE` | Max share of failed page requests, incl. missing `expect` text (0–1) | off |
+| `MAX_API_ERROR_RATE` | Max share of failed sub-requests (0–1) | off |
 | `MAX_MISMATCH` | Max share of requests where the real cache result differed from the plan (0–1) | off |
 
 ## Example Command with All Options
@@ -232,12 +358,15 @@ Key metrics to monitor:
   - p(95): 95th percentile
   - max: Maximum response time
 - **ttfb**: Time to first byte (server time)
-- **errors** / **http_req_failed**: Error rate (network errors and HTTP 4xx/5xx; 2xx/3xx are fine)
+- **errors** / **http_req_failed**: Error rate (network errors and HTTP 4xx/5xx; 2xx/3xx are fine). `errors` also counts a 200 that misses its `expect` text
+- **content_missing**: Share of checked responses without their `expect` text (tag `kind: page|api`)
+- **api_response_times** / **api_errors** / **api_calls_total**: The browser sub-requests from the plan's `platforms` (tag `call`)
+- **page_view_time**: Page time + slowest sub-request (they run in parallel): what one page view costs on that storefront
 - **cache_actual_hit**: Share of responses really served from cache
 - **cache_expectation_mismatch**: Share where the cache did something other than planned (cold cache, a cookie that bypasses FPC, page not cacheable)
 - **requests_total**: Requests sent
 
-Every metric is tagged with `page` and `cache` (`hit`/`miss`), so you can filter, e.g. `response_times{page:product_sample,cache:miss}` in Grafana or the JSON output. Busted URLs are grouped under their page (`name` tag), so unique `?fpc=` values don't explode k6's metric series.
+Every metric is tagged with `page`, `type` (home, category, product, search, ...) and `cache` (`hit`/`miss`), so you can filter, e.g. `response_times{type:search,cache:miss}` or `page_view_time{type:product}` in Grafana or the JSON output. Busted URLs and search terms are grouped under their page (`name` tag), so unique `?fpc=` values don't explode k6's metric series.
 
 ## Generating Reports
 
@@ -257,8 +386,9 @@ npx k6-html-reporter -i results.json -o report.html
 1. Start with low VUs and gradually increase
 2. Monitor application metrics during tests
 3. Run tests from different locations
-4. Test cold rendering with cache busting (`FPC=OFF`, or a low `cache_hit_pct`)
-5. Test a realistic page mix with a CSV instead of one URL
+4. Test cold rendering with cache busting (`FPC=OFF`, or a low `cache_hit`)
+5. Test a realistic page mix with a plan or CSV instead of one URL
+6. Run `npm run validate` first: a load test against pages that 404 or return empty listings measures the wrong thing
 
 ## Troubleshooting
 
@@ -267,7 +397,9 @@ npx k6-html-reporter -i results.json -o report.html
 - `429 Too Many Requests`: Reduce RPS/VUs
 - `500 Errors`: Check application logs
 - `cache_expectation_mismatch` high on "hit" requests: cache is cold, a cookie (e.g. `X-Magento-Vary`) bypasses FPC, or the page is not cacheable
-- `CSV line N: ...`: fix that row of the CSV; the message names the column
+- `CSV line N: ...` / `Plan pages[i] (name): ...`: fix that row or page; the message names the field
+- `api_errors` with HTTP 400 on Magento AJAX calls: the call needs `headers: { X-Requested-With: XMLHttpRequest }`
+- `content_missing` > 0: the page returned 200 without its `expect` text. Run `npm run validate` to see which page
 
 **Debug Command**:
 ```bash
@@ -284,7 +416,7 @@ The toolkit has two test layers. Both run in GitHub Actions on every push and pu
 
 ## Unit tests (Node, no k6 needed)
 
-All logic lives in `lib/` as plain JavaScript that runs in both k6 and Node: config parsing, CSV parsing, page weighting, cache-hit decisions, cache busting, cache detection, load profiles and thresholds. `magento.js` only wires it to k6.
+All logic lives in `lib/` as plain JavaScript that runs in both k6 and Node: plan and CSV parsing, page weighting, cache-hit decisions, cache busting, sub-request building, cache detection, load profiles and thresholds. `magento.js` only wires it to k6. (`lib/vendor/js-yaml.js` is the vendored YAML parser, MIT.)
 
 ```bash
 npm test            # = node --test test/*.test.js  (Node >= 20, no npm install needed)
@@ -292,9 +424,14 @@ npm test            # = node --test test/*.test.js  (Node >= 20, no npm install 
 
 | File | Covers |
 |---|---|
-| `test/config.test.js` | URL/CSV modes, lowercase env names, validation of `N`, `SLEEP`, `FPC`, `BUST_KEY` |
-| `test/csv.test.js` | CSV quoting, CRLF/BOM, comments, errors; the shipped CSVs are valid |
-| `test/scenarios.test.js` | traffic weights, CSV validation with line numbers, `BASE_URL`, traffic and hit-ratio distribution (seeded RNG, 200k draws) |
+| `test/plan.test.js` | YAML plans: settings → options, `-e` precedence, sites/`SITE`/`SITES`, per-platform url/expect, typo detection, terms |
+| `test/sample-data.test.js` | `plans/sample-data.yml` is valid for every site; 20% search / 32% categories / 32% products; Luma banner + XHR header, Flux 2 GraphQL calls, Hyvä none |
+| `test/pageview.test.js` | page + sub-request URLs, `{placeholders}`, busting a miss end to end, fail-fast validation |
+| `test/platform.test.js` | sub-request profiles: `"*"` + per type, headers, validation |
+| `test/template.test.js` | placeholders, browser-style term encoding (`yoga+mat`), terms files |
+| `test/config.test.js` | PLAN/CSV/URL modes, lowercase env names, validation of `N`, `SLEEP`, `FPC`, `BUST_KEY`, `PLATFORM` |
+| `test/csv.test.js` | CSV quoting, CRLF/BOM, comments, real line numbers in errors |
+| `test/scenarios.test.js` | traffic weights, `type`, per-platform overrides, `-` rows, traffic and hit-ratio distribution (seeded RNG, 200k draws) |
 | `test/url.test.js` | `?`/`&`/`#fragment` handling, unique tokens |
 | `test/cache.test.js` | Magento / Fastly / Cloudflare / `Age` detection, error statuses |
 | `test/profile.test.js` | `MODE` executors, thresholds, CLI-compatible defaults |
@@ -302,18 +439,25 @@ npm test            # = node --test test/*.test.js  (Node >= 20, no npm install 
 
 ## Smoke load test (k6 + mock Magento)
 
-Runs the real `magento.js` under k6 against `smoke/mock-magento.js`, a local stand-in for Magento + Varnish (full-URL cache keys, `X-Magento-Cache-Debug`, `Age`, uncacheable `/checkout/`, slower misses). Afterwards `smoke/verify.js` reads what the mock actually received and checks it against the plan.
+Runs the real `magento.js` under k6 against `smoke/mock-magento.js`, a local stand-in for Magento + Varnish (full-URL cache keys, `X-Magento-Cache-Debug`, `Age`, uncacheable `/checkout/`, slower misses, a banner AJAX endpoint that answers 400 without `X-Requested-With`, a GraphQL endpoint). Afterwards `smoke/verify.js` reads what the mock actually received and checks it against the plan.
 
 ```bash
 npm run test:smoke  # = bash smoke/run.sh  (needs k6, Node >= 20, curl)
 ```
 
-It runs three tests:
-1. **Page mix**: `smoke/scenarios.smoke.csv`, 3000 iterations. Checks each page's traffic share and busted share against the CSV, unique buster tokens, a single cold miss per cacheable page, no stray URLs, and the k6 thresholds (no errors, ≤1% cache mismatch, p95 per hit/miss).
+It runs six tests:
+1. **CSV page mix** with search terms and `expect` checks, 3000 iterations: each page's traffic share and busted share, search spread over the term pool, unique buster tokens, a single cold miss per cacheable key, no stray URLs, k6 thresholds (no errors, ≤1% cache mismatch, p95 per hit/miss).
 2. **Single URL, `FPC=OFF`, `N=2`** with CLI flags (`-u 5 -i 200`): 400 requests, all busted, all unique, no hits.
 3. **Single URL, `FPC=ON`**: one cold miss, every other request a hit.
+4. **CSV + `PROFILE`, magento platform**: one banner AJAX per page view, all with the XHR header, busted together with their page.
+5. **YAML plan, headless site**: the `url` override is used, exactly two GraphQL calls (asc + desc) per search, both busted with a busted search. Load, thresholds and terms come from the plan.
+6. **YAML plan, magento site** with `-e ITERATIONS=500` overriding the plan's 1000.
 
 Useful on its own too: `npm run mock` starts the mock on `http://127.0.0.1:18080` (`PORT` to change) to try options without touching a real store; `GET /__stats` shows what it received, `POST /__reset` clears it.
+
+## Validating against a real store
+
+`npm run validate` (see [Validate before you load test](#validate-before-you-load-test)) is the third layer: it checks a plan against a real site with one request per page. `plans/sample-data.yml` passed 80/80 page views on Luma, Hyvä and Flux storefronts of the same sample-data store (all 42 search terms too, with `--all-terms`).
 
 # Full K6 documentation
 

@@ -1,0 +1,44 @@
+# Search terms for {term}, one per line. Every term returns products on
+# Magento sample data (checked with `npm run validate -- --all-terms`).
+bag
+backpack
+tee
+tank
+hoodie
+jacket
+pant
+short
+watch
+yoga
+running
+gym
+fitness
+bra
+capri
+sweatshirt
+fleece
+compression
+messenger
+duffle
+ball
+strap
+kit
+sport
+active
+training
+zip
+hooded
+pullover
+legging
+shirt
+crew
+cardio
+water bottle
+yoga mat
+endurance
+breathe
+hero
+radiant
+juno
+olivia
+cronus

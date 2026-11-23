@@ -1,0 +1,4 @@
+# smoke-test search terms (multi-word on purpose: checks + encoding end to end)
+shirt
+bag
+yoga mat

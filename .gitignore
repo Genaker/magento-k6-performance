@@ -2,3 +2,5 @@ node_modules/
 results.json
 summary.json
 report.html
+# private hosts / plans (e.g. plans/local/my-sites.yml for -e SITES=)
+plans/local/

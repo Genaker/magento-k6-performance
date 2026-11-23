@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeScenarios, pickScenario, decideHit } from '../lib/scenarios.js';
+import { normalizeScenarios, pickScenario, decideHit, scenariosUse } from '../lib/scenarios.js';
 import { seededRandom } from './helpers/rng.js';
 
 const row = (o) => Object.assign({ name: '', url: '', cache_hit_pct: '50', traffic_pct: '10' }, o);
@@ -88,6 +88,48 @@ test('duplicate names are rejected (metrics are tagged by name)', () => {
 test('no usable rows is an error', () => {
   assert.throws(() => normalizeScenarios([]), /no usable rows/);
   assert.throws(() => normalizeScenarios([row({ url: 'https://s.test/', traffic_pct: '0' })]), /no usable rows/);
+});
+
+test('type defaults to "page", is lowercased and validated', () => {
+  assert.equal(normalizeScenarios([row({ url: 'https://s.test/' })])[0].type, 'page');
+  assert.equal(normalizeScenarios([row({ url: 'https://s.test/', type: 'Search' })])[0].type, 'search');
+  assert.throws(() => normalizeScenarios([row({ url: 'https://s.test/', type: 'a b' })]), /type must be/);
+});
+
+test('url_<platform> and expect_<platform> override the base columns', () => {
+  const r = row({
+    name: 's', url: '/catalogsearch/result/?q={term}', url_flux: '/catalog/product_search?search={term}',
+    expect: 'price-box', expect_flux: 'Search results for',
+  });
+  const magento = normalizeScenarios([r], { baseUrl: 'https://s.test', platform: 'luma' })[0];
+  assert.equal(magento.url, 'https://s.test/catalogsearch/result/?q={term}');
+  assert.equal(magento.expect, 'price-box');
+  const flux = normalizeScenarios([r], { baseUrl: 'https://s.test', platform: 'flux' })[0];
+  assert.equal(flux.url, 'https://s.test/catalog/product_search?search={term}');
+  assert.equal(flux.expect, 'Search results for');
+});
+
+test('empty override falls back; "-" skips the row on that platform', () => {
+  const rows = [
+    row({ name: 'a', url: 'https://s.test/a', url_flux: '' }),
+    row({ name: 'b', url: 'https://s.test/b', url_flux: '-' }),
+  ];
+  assert.deepEqual(normalizeScenarios(rows, { platform: 'flux' }).map((s) => s.name), ['a']);
+  assert.deepEqual(normalizeScenarios(rows, { platform: 'luma' }).map((s) => s.name), ['a', 'b']);
+});
+
+test('url may use {term} but no other placeholder', () => {
+  assert.doesNotThrow(() => normalizeScenarios([row({ url: 'https://s.test/s?q={term}' })]));
+  assert.throws(() => normalizeScenarios([row({ url: 'https://s.test/s?q={query}' })]), /\{query\}/);
+});
+
+test('scenariosUse detects {term} in url or expect', () => {
+  const a = normalizeScenarios([row({ url: 'https://s.test/s?q={term}' })]);
+  const b = normalizeScenarios([row({ url: 'https://s.test/x', expect: 'for {term}' })]);
+  const c = normalizeScenarios([row({ url: 'https://s.test/x' })]);
+  assert.equal(scenariosUse(a, 'term'), true);
+  assert.equal(scenariosUse(b, 'term'), true);
+  assert.equal(scenariosUse(c, 'term'), false);
 });
 
 test('pickScenario honours boundaries', () => {
