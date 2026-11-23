@@ -117,6 +117,16 @@ function bodyHas(res, text) {
   return typeof res.body === 'string' && res.body.indexOf(text) !== -1;
 }
 
+// Who answered an error: Server header + start of the error page (Varnish,
+// load balancer and CDN error pages look different). Empty when no body.
+function errorHint(res) {
+  const server = res.headers && (res.headers.Server || res.headers.server);
+  const body = typeof res.body === 'string'
+    ? res.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120)
+    : '';
+  return `${server ? ` server=${server}` : ''}${body ? ` body="${body}"` : ''}`;
+}
+
 export function setup() {
   const target = CONFIG.mode === 'single'
     ? CONFIG.url
@@ -193,7 +203,7 @@ export default function () {
         `${res.timings.duration.toFixed(1)}ms ttfb=${res.timings.waiting.toFixed(1)}ms ${view.url}`
       );
     }
-    if (httpFailed) logFailure(`${CONFIG.method} ${view.url} - Error ${res.status}`);
+    if (httpFailed) logFailure(`${CONFIG.method} ${view.url} - Error ${res.status}${errorHint(res)}`);
     else if (missing) logFailure(`${view.url} - 200 but missing expected text "${view.expect}"`);
 
     // ---- follow-up calls the browser makes (in parallel, like XHRs) ----
@@ -222,7 +232,7 @@ export default function () {
         apiCallsTotal.add(1, ctags);
         if (c.expect) contentMissing.add(cMissing, Object.assign({ kind: 'api' }, ctags));
         if (r.timings.duration > slowestCall) slowestCall = r.timings.duration;
-        if (cHttpFailed) logFailure(`call ${c.name} ${c.url.slice(0, 200)} - Error ${r.status}`);
+        if (cHttpFailed) logFailure(`call ${c.name} ${c.url.slice(0, 120)} - Error ${r.status}${errorHint(r)}`);
         else if (cMissing) logFailure(`call ${c.name} - 200 but missing expected text "${c.expect}"`);
       }
     }

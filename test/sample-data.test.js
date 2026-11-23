@@ -102,3 +102,16 @@ test('search terms are unique and plentiful', () => {
   assert.equal(new Set(terms).size, terms.length);
   assert.ok(terms.length >= 20);
 });
+
+test('flux.fixed sends one full search call (the displayed DESC one), flux.min one minimal call', () => {
+  const env = planEnv(plan, { PLAN: PLAN_PATH, SITE: 'flux' });
+  const base = { wantHit: true, term: 'bag', bustKey: 'fpc', bustToken: 't', now: 1, baseUrl: env.BASE_URL, apiBase: env.API_BASE };
+  for (const [platform, name, marker] of [['flux.fixed', 'gql_search_products', '%22DESC%22'], ['flux.min', 'gql_search_products_min', 'getProductsListMin']]) {
+    const s = normalizeScenarios(planRows(plan), { baseUrl: env.BASE_URL, platform }).find((x) => x.type === 'search');
+    const v = buildPageView(s, { ...base, calls: parsePlatformProfile(planProfile(plan), platform) });
+    assert.equal(v.url, `${env.BASE_URL}/catalog/product_search?search=bag`, platform);
+    assert.deepEqual(v.calls.map((c) => c.name), [name], platform);
+    assert.ok(v.calls[0].url.includes(marker), platform);
+    assert.ok(v.calls[0].url.includes('%22search%22%3A%22bag%22'), platform);
+  }
+});

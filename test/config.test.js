@@ -114,3 +114,8 @@ test('CACHE_HIT overrides every page (0-100)', () => {
   assert.equal(parseConfig({ CSV: 'x.csv' }).cacheHit, undefined);
   assert.throws(() => parseConfig({ CSV: 'x.csv', CACHE_HIT: '150' }), /CACHE_HIT/);
 });
+
+test('PLATFORM accepts a variant like flux.min', () => {
+  assert.equal(parseConfig({ CSV: 'x.csv', PLATFORM: 'flux.min' }).platform, 'flux.min');
+  assert.throws(() => parseConfig({ CSV: 'x.csv', PLATFORM: 'flux.min.x' }), /PLATFORM must be/);
+});

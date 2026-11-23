@@ -196,3 +196,12 @@ test('opts.cacheHit overrides every row', () => {
   ], { cacheHit: 0 });
   assert.deepEqual(s.map((x) => x.cacheHit), [0, 0]);
 });
+
+test('platform variant "flux.min" falls back to url_flux / expect_flux', () => {
+  const r = row({ name: 's', url: '/catalogsearch/result/?q={term}', url_flux: '/catalog/product_search?search={term}', expect: 'price-box', expect_flux: 'Search results for' });
+  const s = normalizeScenarios([r], { baseUrl: 'https://s.test', platform: 'flux.min' })[0];
+  assert.equal(s.url, 'https://s.test/catalog/product_search?search={term}');
+  assert.equal(s.expect, 'Search results for');
+  const own = normalizeScenarios([row({ name: 's', url: '/a', url_flux: '/b', 'url_flux.min': '/c' })], { baseUrl: 'https://s.test', platform: 'flux.min' })[0];
+  assert.equal(own.url, 'https://s.test/c');
+});

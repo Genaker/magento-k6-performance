@@ -198,6 +198,22 @@ What a guest browser requests per page view on Magento sample data (captured in 
 | **Hyvä** | nothing | nothing |
 | **Flux** (Next.js) | nothing: the page is server-rendered | Search results are **not** in the HTML. The browser fetches them from Magento GraphQL (`GET`, cacheable), **twice**: `getProductsList` sorted `position ASC`, then `DESC` |
 
+### Flux search variants (what if the search bug were fixed?)
+
+The plan has three Flux platforms. Pick one with `-e SITE=flux -e PLATFORM=<variant>`. A variant like `flux.min` reuses `flux`'s page URLs and `expect` texts, and only its sub-requests differ:
+
+| `PLATFORM` | GraphQL calls per search page | Measured on an idle server ("jacket") |
+|---|---|---|
+| `flux` (as deployed) | 2 × full `getProductsList` (sort ASC, then DESC: the duplicate) | 2 × ~2.4–4 s, ~427 KB each |
+| `flux.fixed` | 1 × full `getProductsList` (DESC, the one the grid shows) | ~2.4–4 s, ~427 KB |
+| `flux.min` | 1 × minimal query: name, URL, price, one image, total count | ~0.6 s, ~4.6 KB |
+
+The full query returns every variant of every configurable product (10 products + ~150 variants, each with images, gallery and price) for a grid that shows 10 cards.
+
+```bash
+k6 run magento.js -e PLAN=plans/sample-data.yml -e SITE=flux -e PLATFORM=flux.min -e MODE=rps -e RPS=36 -e DURATION=5m
+```
+
 Notes for reading results:
 - Luma without the banner call is lighter than a real Luma visit on Adobe Commerce: every real page view adds one uncached PHP request. It's left out because it's a Magento_Banner design choice you may not want to compare against. If your store keeps the module enabled, uncomment it for a realistic Luma number.
 - On Flux, category, product and CMS pages carry their data in the server-rendered HTML, so k6 loads the backend the same way a browser does. Search is the exception, which is why the plan adds the GraphQL calls. Without them, Flux search would look much cheaper than it is.
