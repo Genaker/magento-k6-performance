@@ -196,17 +196,19 @@ What a guest browser requests per page view on Magento sample data (captured in 
 |---|---|---|
 | **Luma** (Magento Commerce) | `GET /banner/ajax/load/` (Magento_Banner dynamic blocks; uncached PHP; answers **400** without `X-Requested-With: XMLHttpRequest`). **Left out of the plan** (commented out in `platforms.luma`, uncomment to include it) | `GET /catalogsearch/searchTermsLog/save/?q=` |
 | **Hyvä** | nothing | nothing |
-| **Flux** (Next.js) | nothing: the page is server-rendered | Search results are **not** in the HTML. The browser fetches them from Magento GraphQL (`GET`, cacheable), **twice**: `getProductsList` sorted `position ASC`, then `DESC` |
+| **Flux** (Next.js) | nothing: the page is server-rendered | Search results are **not** in the HTML. The browser fetches them from Magento GraphQL (`GET`): one full `getProductsList`. Deployed Flux sends it **twice** (sorted `position ASC`, then `DESC`); the plan sends it once by default (see below) |
 
-### Flux search variants (what if the search bug were fixed?)
+### Flux search variants
 
 The plan has three Flux platforms. Pick one with `-e SITE=flux -e PLATFORM=<variant>`. A variant like `flux.min` reuses `flux`'s page URLs and `expect` texts, and only its sub-requests differ:
 
 | `PLATFORM` | GraphQL calls per search page | Measured on an idle server ("jacket") |
 |---|---|---|
-| `flux` (as deployed) | 2 × full `getProductsList` (sort ASC, then DESC: the duplicate) | 2 × ~2.4–4 s, ~427 KB each |
-| `flux.fixed` | 1 × full `getProductsList` (DESC, the one the grid shows) | ~2.4–4 s, ~427 KB |
+| `flux` (default) | 1 × full `getProductsList` (DESC, the one the grid shows): Flux with the duplicate-search bug fixed | ~2.4–4 s, ~427 KB |
+| `flux.asis` | 2 × full `getProductsList` (sort ASC, then DESC): reproduces the deployed duplicate | 2 × ~2.4–4 s, ~427 KB each |
 | `flux.min` | 1 × minimal query: name, URL, price, one image, total count | ~0.6 s, ~4.6 KB |
+
+The default `flux` does **not** reproduce the duplicate call, so it compares fairly with Luma and Hyvä, which search once. To measure what the bug costs today, run the same load with `-e PLATFORM=flux.asis` and compare.
 
 The full query returns every variant of every configurable product (10 products + ~150 variants, each with images, gallery and price) for a grid that shows 10 cards.
 
@@ -217,7 +219,7 @@ k6 run magento.js -e PLAN=plans/sample-data.yml -e SITE=flux -e PLATFORM=flux.mi
 Notes for reading results:
 - Luma without the banner call is lighter than a real Luma visit on Adobe Commerce: every real page view adds one uncached PHP request. It's left out because it's a Magento_Banner design choice you may not want to compare against. If your store keeps the module enabled, uncomment it for a realistic Luma number.
 - On Flux, category, product and CMS pages carry their data in the server-rendered HTML, so k6 loads the backend the same way a browser does. Search is the exception, which is why the plan adds the GraphQL calls. Without them, Flux search would look much cheaper than it is.
-- The double Flux search request comes from Flux's `SearchProductsProvider`. Its fetch effect runs with the default sort, then the "new search term" effect switches to the search sort and triggers a second fetch. The first result is thrown away. Fixing it in Flux halves search GraphQL load; then remove `gql_search_products_resort` from the plan.
+- The double Flux search request comes from Flux's `SearchProductsProvider`. Its fetch effect runs with the default sort, then the "new search term" effect switches to the search sort and triggers a second fetch. The first result is thrown away. Fixing it in Flux halves search GraphQL load. The default `flux` platform already assumes that fix; `flux.asis` keeps the duplicate.
 - `cache_hit` on Flux: Flux pages come back with `Cache-Control: private, no-store` and no full-page cache in front, so Next.js renders every page request anyway and `?fpc=` changes nothing for pages. It only busts the GraphQL search calls (Varnish keys on the full URL). Flux sends no cache-debug header either, so `cache_actual_hit` stays at 0 there. Compare Flux by response times, not by the hit-ratio metrics.
 
 # Page mix from a CSV

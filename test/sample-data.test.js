@@ -61,19 +61,33 @@ test('every page has an expect text on every site', () => {
   }
 });
 
-test('flux search uses the Flux route and fires both GraphQL calls', () => {
-  const { cfg, scenarios, calls } = siteSetup('flux');
-  const s = scenarios.find((x) => x.type === 'search');
+function fluxSearchView(platform) {
+  const env = planEnv(plan, { PLAN: PLAN_PATH, SITE: 'flux' });
+  const s = normalizeScenarios(planRows(plan), { baseUrl: env.BASE_URL, platform }).find((x) => x.type === 'search');
   const v = buildPageView(s, {
-    wantHit: true, term: 'bag', bustKey: 'fpc', bustToken: 't', now: 1, calls, baseUrl: cfg.baseUrl, apiBase: cfg.apiBase,
+    wantHit: true, term: 'bag', bustKey: 'fpc', bustToken: 't', now: 1,
+    calls: parsePlatformProfile(planProfile(plan), platform), baseUrl: env.BASE_URL, apiBase: env.API_BASE,
   });
-  assert.equal(v.url, `${cfg.baseUrl}/catalog/product_search?search=bag`);
-  assert.equal(v.calls.length, 2);
+  assert.equal(v.url, `${env.BASE_URL}/catalog/product_search?search=bag`, platform);
   for (const c of v.calls) {
-    assert.ok(c.url.startsWith(`${cfg.apiBase}/graphql?query=`));
-    assert.ok(c.url.includes('%22search%22%3A%22bag%22'));
+    assert.ok(c.url.startsWith(`${env.API_BASE}/graphql?query=`), platform);
+    assert.ok(c.url.includes('%22search%22%3A%22bag%22'), platform);
   }
+  return v;
+}
+
+test('flux search sends ONE full GraphQL call per search (the displayed DESC sort, no duplicate)', () => {
+  const v = fluxSearchView('flux');
+  assert.deepEqual(v.calls.map((c) => c.name), ['gql_search_products']);
+  assert.ok(v.calls[0].url.includes('%22DESC%22') && !v.calls[0].url.includes('%22ASC%22'));
+});
+
+test('flux.asis reproduces the deployed duplicate: same query twice, ASC then DESC', () => {
+  const v = fluxSearchView('flux.asis');
+  assert.deepEqual(v.calls.map((c) => c.name), ['gql_search_products', 'gql_search_products_resort']);
   assert.ok(v.calls[0].url.includes('%22ASC%22') && v.calls[1].url.includes('%22DESC%22'));
+  // identical apart from the sort direction
+  assert.equal(v.calls[0].url.replace('%22ASC%22', '%22DESC%22'), v.calls[1].url);
 });
 
 test('luma: only search pages log the term (banner AJAX deliberately left out)', () => {
@@ -103,15 +117,17 @@ test('search terms are unique and plentiful', () => {
   assert.ok(terms.length >= 20);
 });
 
-test('flux.fixed sends one full search call (the displayed DESC one), flux.min one minimal call', () => {
-  const env = planEnv(plan, { PLAN: PLAN_PATH, SITE: 'flux' });
-  const base = { wantHit: true, term: 'bag', bustKey: 'fpc', bustToken: 't', now: 1, baseUrl: env.BASE_URL, apiBase: env.API_BASE };
-  for (const [platform, name, marker] of [['flux.fixed', 'gql_search_products', '%22DESC%22'], ['flux.min', 'gql_search_products_min', 'getProductsListMin']]) {
-    const s = normalizeScenarios(planRows(plan), { baseUrl: env.BASE_URL, platform }).find((x) => x.type === 'search');
-    const v = buildPageView(s, { ...base, calls: parsePlatformProfile(planProfile(plan), platform) });
-    assert.equal(v.url, `${env.BASE_URL}/catalog/product_search?search=bag`, platform);
-    assert.deepEqual(v.calls.map((c) => c.name), [name], platform);
-    assert.ok(v.calls[0].url.includes(marker), platform);
-    assert.ok(v.calls[0].url.includes('%22search%22%3A%22bag%22'), platform);
+test('flux.min sends one minimal search call', () => {
+  const v = fluxSearchView('flux.min');
+  assert.deepEqual(v.calls.map((c) => c.name), ['gql_search_products_min']);
+  assert.ok(v.calls[0].url.includes('getProductsListMin'));
+});
+
+test('no Flux platform sends the duplicate except flux.asis', () => {
+  const profile = planProfile(plan);
+  for (const platform of Object.keys(plan.platforms).filter((p) => p.split('.')[0] === 'flux' && p !== 'flux.asis')) {
+    const names = (parsePlatformProfile(profile, platform).search || []).map((c) => c.name);
+    assert.ok(!names.includes('gql_search_products_resort'), platform);
+    assert.equal(names.length, 1, platform);
   }
 });
