@@ -39,13 +39,16 @@ search_terms_file: ../scenarios/search-terms.txt   # path relative to this plan
 # Requests the browser makes after the page, per page type ("*" = every type).
 # Captured from real guest sessions. A planned cache miss busts these too.
 platforms:
-  luma:                      # Magento Commerce Luma: dynamic banners on every page (uncached PHP)
+  luma:                      # Magento Commerce Luma
     calls:
-      "*":
-        - name: banner_ajax
-          url: /banner/ajax/load/?requesting_page_url={page_url}&sections=&_={ts}
-          headers: { X-Requested-With: XMLHttpRequest }
-          expect: '"store_id"'
+      # Left out on purpose: Adobe Commerce's Magento_Banner also requests
+      # /banner/ajax/load/ after EVERY page (uncached PHP) while the module is
+      # enabled. Real Luma visitors send it; uncomment to include that load.
+      # "*":
+      #   - name: banner_ajax
+      #     url: /banner/ajax/load/?requesting_page_url={page_url}&sections=&_={ts}
+      #     headers: { X-Requested-With: XMLHttpRequest }   # without it Magento answers 400
+      #     expect: '"store_id"'
       search:
         - name: search_terms_log
           url: /catalogsearch/searchTermsLog/save/?q={term}&_={ts}

@@ -116,11 +116,10 @@ search_terms_file: ../scenarios/search-terms.txt                # or: search_ter
 platforms:                      # requests the browser makes AFTER the page, per page type
   luma:
     calls:
-      "*":                      # every page type
-        - name: banner_ajax
-          url: /banner/ajax/load/?requesting_page_url={page_url}&sections=&_={ts}
+      search:                   # a page type, or "*" for every page type
+        - name: search_terms_log
+          url: /catalogsearch/searchTermsLog/save/?q={term}&_={ts}
           headers: { X-Requested-With: XMLHttpRequest }
-          expect: '"store_id"'
   flux:
     calls:
       search:
@@ -188,15 +187,16 @@ npm run validate -- --plan plans/sample-data.yml --sites plans/local/my-sites.ym
 
 ## Comparing Luma, Hyvä and Flux
 
-What a guest browser requests per page view on Magento sample data (captured in a fresh incognito session). These are already in `plans/sample-data.yml`:
+What a guest browser requests per page view on Magento sample data (captured in a fresh incognito session), and what `plans/sample-data.yml` sends:
 
 | Storefront | After every page | After a search page |
 |---|---|---|
-| **Luma** (Magento Commerce) | `GET /banner/ajax/load/` (dynamic blocks; uncached PHP; answers **400** without `X-Requested-With: XMLHttpRequest`) | `GET /catalogsearch/searchTermsLog/save/?q=` |
+| **Luma** (Magento Commerce) | `GET /banner/ajax/load/` (Magento_Banner dynamic blocks; uncached PHP; answers **400** without `X-Requested-With: XMLHttpRequest`). **Left out of the plan** (commented out in `platforms.luma`, uncomment to include it) | `GET /catalogsearch/searchTermsLog/save/?q=` |
 | **Hyvä** | nothing | nothing |
 | **Flux** (Next.js) | nothing: the page is server-rendered | Search results are **not** in the HTML. The browser fetches them from Magento GraphQL (`GET`, cacheable), **twice**: `getProductsList` sorted `position ASC`, then `DESC` |
 
 Notes for reading results:
+- Luma without the banner call is lighter than a real Luma visit on Adobe Commerce: every real page view adds one uncached PHP request. It's left out because it's a Magento_Banner design choice you may not want to compare against. If your store keeps the module enabled, uncomment it for a realistic Luma number.
 - On Flux, category, product and CMS pages carry their data in the server-rendered HTML, so k6 loads the backend the same way a browser does. Search is the exception, which is why the plan adds the GraphQL calls. Without them, Flux search would look much cheaper than it is.
 - The double Flux search request comes from Flux's `SearchProductsProvider`. Its fetch effect runs with the default sort, then the "new search term" effect switches to the search sort and triggers a second fetch. The first result is thrown away. Fixing it in Flux halves search GraphQL load; then remove `gql_search_products_resort` from the plan.
 - `cache_hit` on Flux: Flux pages come back with `Cache-Control: private, no-store` and no full-page cache in front, so Next.js renders every page request anyway and `?fpc=` changes nothing for pages. It only busts the GraphQL search calls (Varnish keys on the full URL). Flux sends no cache-debug header either, so `cache_actual_hit` stays at 0 there. Compare Flux by response times, not by the hit-ratio metrics.
@@ -425,7 +425,7 @@ npm test            # = node --test test/*.test.js  (Node >= 20, no npm install 
 | File | Covers |
 |---|---|
 | `test/plan.test.js` | YAML plans: settings → options, `-e` precedence, sites/`SITE`/`SITES`, per-platform url/expect, typo detection, terms |
-| `test/sample-data.test.js` | `plans/sample-data.yml` is valid for every site; 20% search / 32% categories / 32% products; Luma banner + XHR header, Flux 2 GraphQL calls, Hyvä none |
+| `test/sample-data.test.js` | `plans/sample-data.yml` is valid for every site; 20% search / 32% categories / 32% products; Luma only logs search terms (no banner AJAX), Flux 2 GraphQL calls, Hyvä none |
 | `test/pageview.test.js` | page + sub-request URLs, `{placeholders}`, busting a miss end to end, fail-fast validation |
 | `test/platform.test.js` | sub-request profiles: `"*"` + per type, headers, validation |
 | `test/template.test.js` | placeholders, browser-style term encoding (`yoga+mat`), terms files |

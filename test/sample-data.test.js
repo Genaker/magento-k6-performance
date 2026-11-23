@@ -76,13 +76,18 @@ test('flux search uses the Flux route and fires both GraphQL calls', () => {
   assert.ok(v.calls[0].url.includes('%22ASC%22') && v.calls[1].url.includes('%22DESC%22'));
 });
 
-test('luma sends the banner AJAX on every page with the XHR header', () => {
+test('luma: only search pages log the term (banner AJAX deliberately left out)', () => {
   const { cfg, scenarios, calls } = siteSetup('luma');
   for (const s of scenarios) {
     const v = buildPageView(s, { wantHit: true, term: 'bag', bustKey: 'fpc', bustToken: 't', now: 1, calls, baseUrl: cfg.baseUrl });
-    const banner = v.calls.find((c) => c.name === 'banner_ajax');
-    assert.ok(banner, s.name);
-    assert.equal(banner.headers['X-Requested-With'], 'XMLHttpRequest');
+    assert.ok(!v.calls.some((c) => c.name === 'banner_ajax'), `${s.name} must not send banner_ajax`);
+    if (s.type === 'search') {
+      assert.deepEqual(v.calls.map((c) => c.name), ['search_terms_log']);
+      assert.equal(v.calls[0].headers['X-Requested-With'], 'XMLHttpRequest');
+      assert.ok(v.calls[0].url.endsWith('/catalogsearch/searchTermsLog/save/?q=bag&_=1'));
+    } else {
+      assert.equal(v.calls.length, 0, s.name);
+    }
   }
 });
 
