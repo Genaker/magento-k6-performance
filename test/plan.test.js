@@ -134,3 +134,11 @@ test('planTermsSource: inline list (validated) or file', () => {
   assert.equal(planTermsSource(parsePlanText('pages: [{ url: /, cache_hit: 1, traffic: 1 }]'), 'p.yml'), null);
   assert.throws(() => planTermsSource(parsePlanText('search_terms: [ok, "a&b"]\npages: [{ url: /, cache_hit: 1, traffic: 1 }]'), 'p'), /line 2/);
 });
+
+test('plan accepts stages, abort_on_fail and cache_hit', () => {
+  const plan = parsePlanText('load: { mode: ramp-rps, stages: "1m:10,2m:40" }\nthresholds: { abort_on_fail: true }\noptions: { cache_hit: 0 }\npages: [{ url: /, cache_hit: 90, traffic: 1 }]');
+  const env = planEnv(plan, {});
+  assert.equal(env.STAGES, '1m:10,2m:40');
+  assert.equal(env.ABORT_ON_FAIL, 'true');
+  assert.equal(env.CACHE_HIT, '0');
+});

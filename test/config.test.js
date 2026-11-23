@@ -108,3 +108,9 @@ test('singleScenario maps FPC to a 100% / 0% cache-hit row', () => {
   const off = singleScenario(parseConfig({ URL }));
   assert.equal(off[0].cacheHit, 0);
 });
+
+test('CACHE_HIT overrides every page (0-100)', () => {
+  assert.equal(parseConfig({ CSV: 'x.csv', CACHE_HIT: '0' }).cacheHit, 0);
+  assert.equal(parseConfig({ CSV: 'x.csv' }).cacheHit, undefined);
+  assert.throws(() => parseConfig({ CSV: 'x.csv', CACHE_HIT: '150' }), /CACHE_HIT/);
+});

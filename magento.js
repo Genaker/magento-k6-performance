@@ -53,7 +53,7 @@ const CONFIG = parseConfig(ENV);
 const SCENARIOS = new SharedArray('scenarios', function () {
   if (CONFIG.mode === 'single') return singleScenario(CONFIG);
   const rows = CONFIG.mode === 'plan' ? planRows(PLAN) : parseCsv(open(CONFIG.csv));
-  return normalizeScenarios(rows, { baseUrl: CONFIG.baseUrl, platform: CONFIG.platform });
+  return normalizeScenarios(rows, { baseUrl: CONFIG.baseUrl, platform: CONFIG.platform, cacheHit: CONFIG.cacheHit });
 });
 
 const TERMS = new SharedArray('terms', function () {

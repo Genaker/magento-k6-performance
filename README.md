@@ -49,10 +49,13 @@ sudo yum install k6
 ```
 brew install k6
 ```
-## Docker
+## Docker (no install)
+Run k6 from Grafana's official image against this folder. `--network host` lets it reach local hosts (e.g. the smoke-test mock):
+```bash
+docker run --rm -i --network host -u "$(id -u):$(id -g)" -v "$PWD":/work -w /work grafana/k6:2.4.0 \
+  run magento.js -e PLAN=plans/sample-data.yml -e SITE=flux
 ```
-docker pull loadimpact/k6
-```
+To run the smoke test with it, wrap that command in a small script and pass it as `K6=./k6-docker.sh npm run test:smoke`.
 
 # Usage with Magento
 
@@ -278,6 +281,14 @@ k6 run -e URL="http://yoursite.com/product/36" \
   magento.js
 ```
 
+### 5b. CPU / capacity test (uncached, stepped)
+Cached pages are answered by Varnish and barely touch PHP, so to load the CPU bust every request and step the rate up. Watch server CPU per step; the step where p95 climbs or `dropped_iterations` appear is the limit:
+```bash
+k6 run magento.js -e PLAN=plans/sample-data.yml -e SITE=luma \
+  -e CACHE_HIT=0 -e MODE=ramp-rps -e STAGES=30s:10,2m:10,30s:25,2m:25,30s:40,2m:40,30s:0 \
+  -e MAX_VUS=300 -e MAX_ERROR_RATE=0.05 -e ABORT_ON_FAIL=true
+```
+
 ### 6. Spike Testing
 ```bash
 k6 run -e URL="http://yoursite.com/product/36" \
@@ -306,6 +317,7 @@ All are `-e NAME=value`; names are case-insensitive (`-e url=` = `-e URL=`). In 
 | `N` | Requests per VU iteration | `1` |
 | `SLEEP` | Pause after each request (s) | `0` |
 | `FPC` | Single-page mode: `ON` = use the cache, `OFF` = bust every request | `OFF` |
+| `CACHE_HIT` | Plan/CSV mode: override every page's `cache_hit` (0–100). `0` = every request uncached | – |
 | `BUST_KEY` | Query param used for busting | `fpc` |
 | `DEBUG_HEADER` | Send `X-Magento-Debug: 1` | `true` |
 | `FRESH_SESSION` | Clear cookies before each request (new-visitor behavior) | `false` |
@@ -315,7 +327,9 @@ All are `-e NAME=value`; names are case-insensitive (`-e url=` = `-e URL=`). In 
 ### Load shape (optional — CLI flags are used when `MODE` is not set)
 | Variable | Description | Default |
 |---|---|---|
-| `MODE` | `vus` (ramping-vus), `rps` (constant-arrival-rate), `iterations` (shared-iterations) | – |
+| `MODE` | `vus` (ramping-vus), `rps` (constant-arrival-rate), `ramp-rps` (ramping-arrival-rate, follows `STAGES`), `iterations` (shared-iterations) | – |
+| `STAGES` | `ramp-rps`: `duration:req/s` pairs, e.g. `30s:10,2m:10,30s:25,2m:25` (ramp, then hold) | `1m:10,2m:30,2m:60` |
+| `START_RPS` | `ramp-rps`: rate at the start | `0` |
 | `VUS` | Peak VUs (`vus`), VUs (`iterations`), pre-allocated VUs (`rps`) | `50` / `10` / `RPS` |
 | `RPS` | Requests per second (`rps`) | `50` |
 | `MAX_VUS` | VU ceiling (`rps`) | `RPS × 4` |
@@ -331,6 +345,7 @@ All are `-e NAME=value`; names are case-insensitive (`-e url=` = `-e URL=`). In 
 | `MAX_ERROR_RATE` | Max share of failed page requests, incl. missing `expect` text (0–1) | off |
 | `MAX_API_ERROR_RATE` | Max share of failed sub-requests (0–1) | off |
 | `MAX_MISMATCH` | Max share of requests where the real cache result differed from the plan (0–1) | off |
+| `ABORT_ON_FAIL` | `true`: stop the whole test as soon as `MAX_ERROR_RATE` / `MAX_API_ERROR_RATE` is broken (after 30 s of data), so a ramp can't keep hammering a failing site | `false` |
 
 ## Example Command with All Options
 ```bash

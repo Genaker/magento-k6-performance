@@ -188,3 +188,11 @@ test('decideHit matches cache_hit_pct over many draws', () => {
     assert.ok(Math.abs(hits / N - p) <= tol, `${pct}%: got ${hits / N}`);
   }
 });
+
+test('opts.cacheHit overrides every row', () => {
+  const s = normalizeScenarios([
+    row({ name: 'a', url: 'https://s.test/a', cache_hit_pct: '95' }),
+    row({ name: 'b', url: 'https://s.test/b', cache_hit_pct: '50' }),
+  ], { cacheHit: 0 });
+  assert.deepEqual(s.map((x) => x.cacheHit), [0, 0]);
+});
