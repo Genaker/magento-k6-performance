@@ -54,37 +54,40 @@ brew install k6
 docker pull loadimpact/k6
 ```
 
-# Usage with Magento 
+# Usage with Magento
+
+One script, `magento.js`, two modes:
+
+| Mode | Turn it on with | What it does |
+|---|---|---|
+| **Single page** | `-e URL=https://site/page.html` | Hits one URL. `FPC=OFF` (default) busts the Full Page Cache on every request; `FPC=ON` lets the cache serve it. |
+| **Page mix** | `-e CSV=scenarios.csv` | Picks pages by traffic share; for every request decides cache hit vs forced miss from that page's hit ratio. |
 
 ```
-k6 run magento.js -e url=https://example.com -u 200 -i 6000 --include-system-env-vars=false
+k6 run magento.js -e URL=https://example.com -u 200 -i 6000 --include-system-env-vars=false
 ```
 Where:
 
 magento.js - script name  
--e url= site URL to test as env variable  
--e sleep=0.2 etc. add sleep after HTTP response
+-e URL= site URL to test as env variable (lowercase `-e url=` works too)  
+-e SLEEP=0.2 etc. add sleep after each HTTP response  
 -u virtual users / concurrency / threads  
--i number of iteration  
+-i number of iterations  
 --include-system-env-vars=false - don't include OS/system env variables  
 
-# Mixed-traffic FPC test (CSV scenarios) — `magento-load.js`
+Load is controlled by the usual k6 CLI flags (`-u`, `-i`, `--duration`, `--stage`, `--rps`), exactly as before. Optionally, `-e MODE=vus|rps|iterations` makes the script build the executor itself (see [Options](#options)).
 
-`magento.js` hits one URL. Real traffic is a mix: many pages, each with its own
-share of visitors and its own cache hit ratio. `magento-load.js` drives the whole
-run from a CSV where every row is a page with two independent weights:
+## How cache busting works
 
-- **`cache_hit_pct`** — share of requests to that page that should be **FPC hits**.
-  The rest get a unique `?fpc=<token>` query param appended, so Varnish / Magento
-  Full Page Cache sees a new cache key → forced **MISS** (full PHP render).
-- **`traffic_pct`** — the page's share of total traffic (relative; normalized,
-  so the column does not have to sum to 100).
+For a request that should **miss** the cache, the script appends a unique `?fpc=<vu>-<iter>-<seq>-<time>-<rand>` (or `&fpc=` if the URL already has a query; a `#fragment` stays at the end). Varnish and Magento FPC key on the full URL, so every busted request renders fresh in PHP. A request that should **hit** uses the bare URL.
 
-It also **verifies** the real cache result of every response
-(`X-Magento-Cache-Debug`, `X-Cache`, or `Age > 0`) and reports expected vs actual
-hit ratio, with every metric tagged by page and by hit/miss.
+Every response is also checked for whether it **really** came from cache: `X-Magento-Cache-Debug` → `X-Cache` (Fastly/CDN) → `CF-Cache-Status` (Cloudflare) → fallback `Age > 0`. The script sends `X-Magento-Debug: 1` so Varnish echoes `X-Magento-Cache-Debug`; that only works when your load generator's IP is in the Varnish debug ACL. Without it, the `Age` fallback undercounts hits in the first second after a page is cached (Varnish reports `Age: 0` then).
 
-## CSV format (`scenarios.csv`)
+> Busting fills Varnish with one-off objects. On long runs against production, watch Varnish memory / `n_lru_nuked`, or use a lower miss share.
+
+# Page mix from a CSV
+
+`scenarios.csv` — one row per page:
 
 ```csv
 name,url,cache_hit_pct,traffic_pct
@@ -95,71 +98,29 @@ search_shirt,https://example.com/catalogsearch/result/?q=shirt,20,8
 cart,https://example.com/checkout/cart/,0,3
 ```
 
-- `name` — label used to tag metrics (defaults to the URL if blank).
-- `cache_hit_pct` — 0–100. `0` = always bust FPC, `100` = never bust.
-- `traffic_pct` — relative weight; rows with `traffic_pct <= 0` are skipped.
-- URLs that already have a `?query` are handled (`&fpc=` is appended instead).
+| Column | Meaning |
+|---|---|
+| `name` | Label for metric tags. Must be unique; defaults to the URL. |
+| `url` | Absolute `https://…`, or a path like `/women.html` combined with `-e BASE_URL=https://example.com` (one CSV for staging and production). |
+| `cache_hit_pct` | 0–100. Share of this page's requests sent as the bare URL (cache hit). The rest are busted. `0` = always miss, `100` = never bust. |
+| `traffic_pct` | Relative share of all traffic. Doesn't need to sum to 100 (it is normalized). `0` switches the row off. |
 
-## Run
+Lines starting with `#` are comments. A bad row stops the run with its line number (non-numeric value, `cache_hit_pct` outside 0–100, duplicate `name`, relative URL without `BASE_URL`, ...).
 
 ```bash
-# ramping VUs (default): 0 -> VUS over RAMP, hold DURATION, ramp down
-k6 run magento-load.js -e CSV=scenarios.csv -e VUS=100 -e DURATION=3m
+# page mix, load from CLI flags
+k6 run magento.js -e CSV=scenarios.csv -u 100 --duration 5m
 
-# fixed request rate (open model) instead of VUs
-k6 run magento-load.js -e MODE=rps -e RPS=200 -e DURATION=2m
+# same CSV against staging using relative URLs
+k6 run magento.js -e CSV=scenarios.csv -e BASE_URL=https://staging.example.com -u 50 --duration 2m
 
-# JSON + HTML report
-k6 run magento-load.js -e VUS=100 --out json=results.json
-npx k6-html-reporter -i results.json -o report.html
+# fixed request rate, built-in executor
+k6 run magento.js -e CSV=scenarios.csv -e MODE=rps -e RPS=200 -e DURATION=5m
 ```
 
-## Options
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `CSV` | `./scenarios.csv` | path to the scenario CSV |
-| `MODE` | `vus` | `vus` (ramping-vus) or `rps` (constant-arrival-rate) |
-| `VUS` | `50` | peak VUs (preallocated VUs in `rps` mode) |
-| `RPS` | `50` | requests/sec when `MODE=rps` |
-| `MAX_VUS` | `RPS*4` | VU ceiling in `rps` mode |
-| `DURATION` | `3m` (`1m` in rps) | steady-state duration |
-| `RAMP` / `RAMPDOWN` | `30s` / `10s` | ramp up / down (vus mode) |
-| `SLEEP` | `0.5` | think time (s) between iterations |
-| `BUST_KEY` | `fpc` | query key used to bust the cache |
-| `DEBUG_HEADER` | `true` | send `X-Magento-Debug: 1` so the edge echoes cache debug |
-| `FRESH_SESSION` | `false` | clear cookies each iteration (new-visitor behavior) |
-| `T_HIT` / `T_MISS` | `800` / `4000` | p95 threshold (ms) for hits / misses |
-| `SUMMARY_JSON` | `true` | also write `summary.json` |
-
-## Metrics
-
-All tagged by `page` and `cache` (`hit`/`miss`):
-
-- `resp_time`, `ttfb` — timing trends; thresholds are split hit vs miss.
-- `errors`, `http_req_failed` — error rates (network errors count as errors).
-- `requests_total` — per-page request counter.
-- `cache_actual_hit` — measured hit ratio from the response headers.
-- `cache_expectation_mismatch` — the edge disagreed with what was requested
-  (e.g. a "hit" request that actually MISSed: cold cache, bypass, or vary cookies).
-
-Filter by tag in the summary or Grafana, e.g.
-`resp_time{page:product_sample,cache:miss}`.
-
-> `X-Magento-Cache-Debug` is only emitted when the client IP is in the
-> Varnish/Fastly debug ACL. If your edge doesn't echo it, the script falls back
-> to the `Age` header (hit ⇒ `Age > 0`).
+`N` and `SLEEP` apply per request in both modes; in CSV mode each of the `N` requests picks its own page.
 
 # Load Testing Guide
-
-## Installation
-```bash
-# Install k6
-sudo apt-get update && sudo apt-get install k6
-
-# Verify installation
-k6 version
-```
 
 ## Basic Test Scenarios
 
@@ -185,34 +146,65 @@ k6 run -e URL="http://yoursite.com/product/36" \
   magento.js
 ```
 
+### 4. Realistic traffic mix
+```bash
+k6 run -e CSV=scenarios.csv --vus 200 --duration 10m magento.js
+```
+
 ## Advanced Scenarios
 
-### 4. Ramp-up Pattern
+### 5. Ramp-up Pattern
 ```bash
 k6 run -e URL="http://yoursite.com/product/36" \
   --stage 2m:200 --stage 5m:200 --stage 1m:0 \
   magento.js
 ```
 
-### 5. Spike Testing
+### 6. Spike Testing
 ```bash
 k6 run -e URL="http://yoursite.com/product/36" \
   --stage 30s:1000 --stage 1m:1000 --stage 30s:50 \
   magento.js
 ```
 
-## Configuration Options
+## Options
 
-### Environment Variables
-| Variable    | Description                | Default     |
-|-------------|----------------------------|-------------|
-| `URL`       | Target endpoint            | Required    |
-| `METHOD`    | HTTP Method                | `GET`       |
-| `N`         | Iterations per VU          | `1`         |
-| `SLEEP`     | Delay between requests (s) | `0`         |
-| `FPC`       | Full Page Cache            | `OFF`       |
-| `USERNAME`  | Basic Auth username        | -           |
-| `PASSWORD`  | Basic Auth password        | -           |
+All are `-e NAME=value`; names are case-insensitive (`-e url=` = `-e URL=`).
+
+### Target and requests
+| Variable | Description | Default |
+|---|---|---|
+| `URL` | Single-page mode: target URL | – |
+| `CSV` | Page-mix mode: path to the scenario CSV | – |
+| `BASE_URL` | Prefix for relative CSV urls (`/women.html`) | – |
+| `METHOD` | HTTP method | `GET` |
+| `N` | Requests per VU iteration | `1` |
+| `SLEEP` | Pause after each request (s) | `0` |
+| `FPC` | Single-page mode: `ON` = use the cache, `OFF` = bust every request | `OFF` |
+| `BUST_KEY` | Query param used for busting | `fpc` |
+| `DEBUG_HEADER` | Send `X-Magento-Debug: 1` | `true` |
+| `FRESH_SESSION` | Clear cookies before each request (new-visitor behavior) | `false` |
+| `VERBOSE` | Log every request (slows k6 down at high load) | `false` |
+| `USERNAME` / `PASSWORD` | HTTP Basic Auth (e.g. staging behind htpasswd) | – |
+
+### Load shape (optional — CLI flags are used when `MODE` is not set)
+| Variable | Description | Default |
+|---|---|---|
+| `MODE` | `vus` (ramping-vus), `rps` (constant-arrival-rate), `iterations` (shared-iterations) | – |
+| `VUS` | Peak VUs (`vus`), VUs (`iterations`), pre-allocated VUs (`rps`) | `50` / `10` / `RPS` |
+| `RPS` | Requests per second (`rps`) | `50` |
+| `MAX_VUS` | VU ceiling (`rps`) | `RPS × 4` |
+| `DURATION` | Steady-state duration (`vus`, `rps`) | `3m` / `1m` |
+| `RAMP` / `RAMPDOWN` | Ramp up / down (`vus`) | `30s` / `10s` |
+| `ITERATIONS` | Total iterations (`iterations`) | `1000` |
+
+### Thresholds (non-zero exit code when broken)
+| Variable | Description | Default |
+|---|---|---|
+| `T_P95` | p95 of all `response_times` (ms) | `10000` |
+| `T_HIT` / `T_MISS` | p95 for cache hits / misses (ms) | off |
+| `MAX_ERROR_RATE` | Max share of failed requests (0–1) | off |
+| `MAX_MISMATCH` | Max share of requests where the real cache result differed from the plan (0–1) | off |
 
 ## Example Command with All Options
 ```bash
@@ -223,6 +215,7 @@ k6 run \
   -e SLEEP=0.5 \
   -e FPC=ON \
   -e USERNAME=test -e PASSWORD=test123 \
+  -e T_P95=3000 -e MAX_ERROR_RATE=0.01 \
   --vus 200 \
   --duration 10m \
   --rps 100 \
@@ -234,12 +227,17 @@ k6 run \
 
 Key metrics to monitor:
 - **VUs**: Active virtual users
-- **iterations**: Completed requests
-- **http_req_duration**: Response times
+- **iterations**: Completed iterations
+- **response_times** / **http_req_duration**: Response times
   - p(95): 95th percentile
   - max: Maximum response time
-- **http_req_failed**: Error rate
-- **rps**: Requests per second
+- **ttfb**: Time to first byte (server time)
+- **errors** / **http_req_failed**: Error rate (network errors and HTTP 4xx/5xx; 2xx/3xx are fine)
+- **cache_actual_hit**: Share of responses really served from cache
+- **cache_expectation_mismatch**: Share where the cache did something other than planned (cold cache, a cookie that bypasses FPC, page not cacheable)
+- **requests_total**: Requests sent
+
+Every metric is tagged with `page` and `cache` (`hit`/`miss`), so you can filter, e.g. `response_times{page:product_sample,cache:miss}` in Grafana or the JSON output. Busted URLs are grouped under their page (`name` tag), so unique `?fpc=` values don't explode k6's metric series.
 
 ## Generating Reports
 
@@ -259,25 +257,64 @@ npx k6-html-reporter -i results.json -o report.html
 1. Start with low VUs and gradually increase
 2. Monitor application metrics during tests
 3. Run tests from different locations
-4. Combine with cache busting (FPC=OFF)
-5. Test different endpoints simultaneously
+4. Test cold rendering with cache busting (`FPC=OFF`, or a low `cache_hit_pct`)
+5. Test a realistic page mix with a CSV instead of one URL
 
 ## Troubleshooting
 
 **Common Errors**:
-- `405 Method Not Allowed`: Ensure correct HTTP method case (UPPERCASE)
+- `405 Method Not Allowed`: check `METHOD` (it is uppercased for you)
 - `429 Too Many Requests`: Reduce RPS/VUs
 - `500 Errors`: Check application logs
+- `cache_expectation_mismatch` high on "hit" requests: cache is cold, a cookie (e.g. `X-Magento-Vary`) bypasses FPC, or the page is not cacheable
+- `CSV line N: ...`: fix that row of the CSV; the message names the column
 
 **Debug Command**:
 ```bash
 k6 run -e URL="http://yoursite.com/product/36" \
+  -e VERBOSE=true \
   --http-debug=full \
   --vus 1 --iterations 1 \
   magento.js
 ```
 
+# Testing
+
+The toolkit has two test layers. Both run in GitHub Actions on every push and pull request (`.github/workflows/test.yml`).
+
+## Unit tests (Node, no k6 needed)
+
+All logic lives in `lib/` as plain JavaScript that runs in both k6 and Node: config parsing, CSV parsing, page weighting, cache-hit decisions, cache busting, cache detection, load profiles and thresholds. `magento.js` only wires it to k6.
+
+```bash
+npm test            # = node --test test/*.test.js  (Node >= 20, no npm install needed)
+```
+
+| File | Covers |
+|---|---|
+| `test/config.test.js` | URL/CSV modes, lowercase env names, validation of `N`, `SLEEP`, `FPC`, `BUST_KEY` |
+| `test/csv.test.js` | CSV quoting, CRLF/BOM, comments, errors; the shipped CSVs are valid |
+| `test/scenarios.test.js` | traffic weights, CSV validation with line numbers, `BASE_URL`, traffic and hit-ratio distribution (seeded RNG, 200k draws) |
+| `test/url.test.js` | `?`/`&`/`#fragment` handling, unique tokens |
+| `test/cache.test.js` | Magento / Fastly / Cloudflare / `Age` detection, error statuses |
+| `test/profile.test.js` | `MODE` executors, thresholds, CLI-compatible defaults |
+| `test/k6-script.test.js` | `magento.js` imports resolve, `lib/` has no k6/Node deps or too-new syntax, no dead code |
+
+## Smoke load test (k6 + mock Magento)
+
+Runs the real `magento.js` under k6 against `smoke/mock-magento.js`, a local stand-in for Magento + Varnish (full-URL cache keys, `X-Magento-Cache-Debug`, `Age`, uncacheable `/checkout/`, slower misses). Afterwards `smoke/verify.js` reads what the mock actually received and checks it against the plan.
+
+```bash
+npm run test:smoke  # = bash smoke/run.sh  (needs k6, Node >= 20, curl)
+```
+
+It runs three tests:
+1. **Page mix**: `smoke/scenarios.smoke.csv`, 3000 iterations. Checks each page's traffic share and busted share against the CSV, unique buster tokens, a single cold miss per cacheable page, no stray URLs, and the k6 thresholds (no errors, ≤1% cache mismatch, p95 per hit/miss).
+2. **Single URL, `FPC=OFF`, `N=2`** with CLI flags (`-u 5 -i 200`): 400 requests, all busted, all unique, no hits.
+3. **Single URL, `FPC=ON`**: one cold miss, every other request a hit.
+
+Useful on its own too: `npm run mock` starts the mock on `http://127.0.0.1:18080` (`PORT` to change) to try options without touching a real store; `GET /__stats` shows what it received, `POST /__reset` clears it.
+
 # Full K6 documentation
 
 [https://k6.io/docs/](https://k6.io/docs/)
-

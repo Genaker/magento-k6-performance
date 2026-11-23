@@ -1,0 +1,7 @@
+name,url,cache_hit_pct,traffic_pct
+home,/,95,35
+category,/women.html,90,25
+product,/sample-product.html,50,20
+search,/catalogsearch/result/?q=shirt,20,10
+cms,/about-us,100,5
+cart,/checkout/cart/,0,5

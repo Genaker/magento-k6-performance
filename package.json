@@ -1,0 +1,15 @@
+{
+  "name": "magento-k6-performance",
+  "version": "2.0.0",
+  "private": true,
+  "description": "k6 load testing toolkit for Magento 2 with Full Page Cache aware page mixes",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:smoke": "bash smoke/run.sh",
+    "mock": "node smoke/mock-magento.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
