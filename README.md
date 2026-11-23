@@ -68,6 +68,88 @@ magento.js - script name
 -i number of iteration  
 --include-system-env-vars=false - don't include OS/system env variables  
 
+# Mixed-traffic FPC test (CSV scenarios) — `magento-load.js`
+
+`magento.js` hits one URL. Real traffic is a mix: many pages, each with its own
+share of visitors and its own cache hit ratio. `magento-load.js` drives the whole
+run from a CSV where every row is a page with two independent weights:
+
+- **`cache_hit_pct`** — share of requests to that page that should be **FPC hits**.
+  The rest get a unique `?fpc=<token>` query param appended, so Varnish / Magento
+  Full Page Cache sees a new cache key → forced **MISS** (full PHP render).
+- **`traffic_pct`** — the page's share of total traffic (relative; normalized,
+  so the column does not have to sum to 100).
+
+It also **verifies** the real cache result of every response
+(`X-Magento-Cache-Debug`, `X-Cache`, or `Age > 0`) and reports expected vs actual
+hit ratio, with every metric tagged by page and by hit/miss.
+
+## CSV format (`scenarios.csv`)
+
+```csv
+name,url,cache_hit_pct,traffic_pct
+home,https://example.com/,95,35
+category_women,https://example.com/women.html,90,20
+product_sample,https://example.com/sample-product.html,80,15
+search_shirt,https://example.com/catalogsearch/result/?q=shirt,20,8
+cart,https://example.com/checkout/cart/,0,3
+```
+
+- `name` — label used to tag metrics (defaults to the URL if blank).
+- `cache_hit_pct` — 0–100. `0` = always bust FPC, `100` = never bust.
+- `traffic_pct` — relative weight; rows with `traffic_pct <= 0` are skipped.
+- URLs that already have a `?query` are handled (`&fpc=` is appended instead).
+
+## Run
+
+```bash
+# ramping VUs (default): 0 -> VUS over RAMP, hold DURATION, ramp down
+k6 run magento-load.js -e CSV=scenarios.csv -e VUS=100 -e DURATION=3m
+
+# fixed request rate (open model) instead of VUs
+k6 run magento-load.js -e MODE=rps -e RPS=200 -e DURATION=2m
+
+# JSON + HTML report
+k6 run magento-load.js -e VUS=100 --out json=results.json
+npx k6-html-reporter -i results.json -o report.html
+```
+
+## Options
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CSV` | `./scenarios.csv` | path to the scenario CSV |
+| `MODE` | `vus` | `vus` (ramping-vus) or `rps` (constant-arrival-rate) |
+| `VUS` | `50` | peak VUs (preallocated VUs in `rps` mode) |
+| `RPS` | `50` | requests/sec when `MODE=rps` |
+| `MAX_VUS` | `RPS*4` | VU ceiling in `rps` mode |
+| `DURATION` | `3m` (`1m` in rps) | steady-state duration |
+| `RAMP` / `RAMPDOWN` | `30s` / `10s` | ramp up / down (vus mode) |
+| `SLEEP` | `0.5` | think time (s) between iterations |
+| `BUST_KEY` | `fpc` | query key used to bust the cache |
+| `DEBUG_HEADER` | `true` | send `X-Magento-Debug: 1` so the edge echoes cache debug |
+| `FRESH_SESSION` | `false` | clear cookies each iteration (new-visitor behavior) |
+| `T_HIT` / `T_MISS` | `800` / `4000` | p95 threshold (ms) for hits / misses |
+| `SUMMARY_JSON` | `true` | also write `summary.json` |
+
+## Metrics
+
+All tagged by `page` and `cache` (`hit`/`miss`):
+
+- `resp_time`, `ttfb` — timing trends; thresholds are split hit vs miss.
+- `errors`, `http_req_failed` — error rates (network errors count as errors).
+- `requests_total` — per-page request counter.
+- `cache_actual_hit` — measured hit ratio from the response headers.
+- `cache_expectation_mismatch` — the edge disagreed with what was requested
+  (e.g. a "hit" request that actually MISSed: cold cache, bypass, or vary cookies).
+
+Filter by tag in the summary or Grafana, e.g.
+`resp_time{page:product_sample,cache:miss}`.
+
+> `X-Magento-Cache-Debug` is only emitted when the client IP is in the
+> Varnish/Fastly debug ACL. If your edge doesn't echo it, the script falls back
+> to the `Age` header (hit ⇒ `Age > 0`).
+
 # Load Testing Guide
 
 ## Installation

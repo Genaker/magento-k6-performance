@@ -1,0 +1,8 @@
+name,url,cache_hit_pct,traffic_pct
+home,https://example.com/,95,35
+category_women,https://example.com/women.html,90,20
+category_men,https://example.com/men.html,90,15
+product_sample,https://example.com/sample-product.html,80,15
+search_shirt,https://example.com/catalogsearch/result/?q=shirt,20,8
+cms_about,https://example.com/about-us,98,4
+cart,https://example.com/checkout/cart/,0,3
