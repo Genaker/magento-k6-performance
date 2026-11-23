@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { parseCsv } from '../lib/csv.js';
+import { parseCsv } from '../lib/sources/csv.js';
 import { normalizeScenarios } from '../lib/scenarios.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));

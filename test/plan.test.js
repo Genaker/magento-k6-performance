@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parsePlanText, applySitesText, planEnv, planRows, planProfile, resolveRelative, planTermsSource,
-} from '../lib/plan.js';
+} from '../lib/sources/yaml.js';
 import { normalizeScenarios } from '../lib/scenarios.js';
 
 const PLAN = `

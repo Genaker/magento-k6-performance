@@ -20,6 +20,8 @@
  *   PLATFORM picks `<column>_<platform>` CSV overrides; PROFILE adds the
  *   AJAX/GraphQL calls that platform's browser makes after each page type.
  *
+ * Each input format has its own adapter in ./lib/sources (yaml.js, csv.js,
+ * single.js); this script only sees their common interface.
  * Load comes from k6 CLI flags, or from MODE=vus|rps|iterations.
  * All logic lives in ./lib (unit-tested with `npm test`). See README.md.
  */
@@ -29,52 +31,30 @@ import { sleep, check } from 'k6';
 import { Trend, Rate, Counter } from 'k6/metrics';
 import { SharedArray } from 'k6/data';
 
-import { parseConfig, singleScenario } from './lib/config.js';
-import { parseCsv } from './lib/csv.js';
-import { normalizeScenarios, pickScenario, decideHit, scenariosUse } from './lib/scenarios.js';
+import { parseConfig } from './lib/config.js';
+import { pickScenario, decideHit, scenariosUse } from './lib/scenarios.js';
 import { makeBustToken } from './lib/url.js';
 import { detectCacheHit, isErrorStatus } from './lib/cache.js';
 import { buildOptions } from './lib/profile.js';
-import { parseTerms } from './lib/template.js';
-import { parsePlatformProfile, callsUse } from './lib/platform.js';
+import { callsUse } from './lib/platform.js';
 import { buildPageView, validatePlan } from './lib/pageview.js';
-import { parsePlanText, applySitesText, planEnv, planRows, planProfile, planTermsSource } from './lib/plan.js';
+import { openSource } from './lib/sources/index.js';
 
-// A YAML plan supplies settings; real -e values override them.
-// -e SITES=<file> swaps in private hosts without editing the shared plan.
-const PLAN_PATH = __ENV.PLAN || __ENV.plan;
-const SITES_PATH = __ENV.SITES || __ENV.sites;
-let PLAN = PLAN_PATH ? parsePlanText(open(PLAN_PATH), PLAN_PATH) : null;
-if (PLAN && SITES_PATH) PLAN = applySitesText(PLAN, open(SITES_PATH), SITES_PATH);
-const ENV = PLAN ? planEnv(PLAN, __ENV) : __ENV;
+// The input format (YAML plan, CSV, single URL) is handled by an adapter in
+// lib/sources/; from here on the code is the same for every format.
+// open() is called from this file so k6 resolves paths relative to it.
+const SOURCE = openSource(__ENV, function (path) { return open(path); });
+const ENV = SOURCE.env; // a plan's settings, with real -e values on top
 const CONFIG = parseConfig(ENV);
 
 // Loaded once and shared by all VUs. open() only works in the init context.
-const SCENARIOS = new SharedArray('scenarios', function () {
-  if (CONFIG.mode === 'single') return singleScenario(CONFIG);
-  const rows = CONFIG.mode === 'plan' ? planRows(PLAN) : parseCsv(open(CONFIG.csv));
-  return normalizeScenarios(rows, { baseUrl: CONFIG.baseUrl, platform: CONFIG.platform, cacheHit: CONFIG.cacheHit });
-});
-
-const TERMS = new SharedArray('terms', function () {
-  if (CONFIG.terms) return parseTerms(open(CONFIG.terms)); // -e TERMS= wins over the plan
-  const src = PLAN ? planTermsSource(PLAN, PLAN_PATH) : null;
-  if (src && src.inline) return src.inline;
-  if (src && src.file) return parseTerms(open(src.file));
-  return [];
-});
-
-// Browser sub-requests for this platform: the plan's "platforms" section, or
-// a PROFILE json in CSV mode. SharedArray needs an array, so wrap it.
-function loadProfile() {
-  if (PLAN) return planProfile(PLAN);
-  return CONFIG.profile ? JSON.parse(open(CONFIG.profile)) : null;
-}
-const CALLS = CONFIG.platform && (PLAN ? PLAN.platforms : CONFIG.profile)
-  ? new SharedArray('calls', function () {
-    return [parsePlatformProfile(loadProfile(), CONFIG.platform)];
-  })[0]
-  : null;
+const SCENARIOS = new SharedArray('scenarios', function () { return SOURCE.scenarios(CONFIG); });
+const TERMS = new SharedArray('terms', function () { return SOURCE.terms(CONFIG); });
+// Browser sub-requests for this platform (SharedArray needs an array: wrap it).
+const CALLS = new SharedArray('calls', function () {
+  const calls = SOURCE.calls(CONFIG);
+  return calls ? [calls] : [];
+})[0] || null;
 
 if ((scenariosUse(SCENARIOS, 'term') || (CALLS && callsUse(CALLS, 'term'))) && TERMS.length === 0) {
   throw new Error('Scenarios use {term}: set -e TERMS=path/to/search-terms.txt (one term per line)');
@@ -128,13 +108,9 @@ function errorHint(res) {
 }
 
 export function setup() {
-  const target = CONFIG.mode === 'single'
-    ? CONFIG.url
-    : CONFIG.mode === 'plan'
-      ? `${PLAN.name || CONFIG.plan} (${SCENARIOS.length} pages${CONFIG.site ? `, site ${CONFIG.site}: ${CONFIG.baseUrl}` : ''})`
-      : `${CONFIG.csv} (${SCENARIOS.length} pages)`;
+  const target = SOURCE.label(CONFIG, SCENARIOS.length);
   console.log(
-    `Mode: ${CONFIG.mode} | Target: ${target} | Method: ${CONFIG.method} | N: ${CONFIG.n}` +
+    `Source: ${SOURCE.kind} | Target: ${target} | Method: ${CONFIG.method} | N: ${CONFIG.n}` +
     (CONFIG.platform ? ` | Platform: ${CONFIG.platform}` : '') +
     (TERMS.length ? ` | Search terms: ${TERMS.length}` : '')
   );
@@ -248,9 +224,9 @@ export function teardown() {
     ? (CONFIG.fpcEnabled ? 'FPC Enabled' : 'Cache Busted')
     : 'Per page (cache_hit_pct)';
   console.log(`\nTest Summary:
-  Mode: ${CONFIG.mode}
-  Target: ${CONFIG.mode === 'single' ? CONFIG.url : CONFIG.mode === 'plan' ? `${CONFIG.plan}${CONFIG.site ? ` (site ${CONFIG.site})` : ''}` : CONFIG.csv}
-  Platform: ${CONFIG.platform || '-'}${CONFIG.profile ? ` (profile ${CONFIG.profile})` : ''}
+  Source: ${SOURCE.kind}
+  Target: ${SOURCE.label(CONFIG, SCENARIOS.length)}
+  Platform: ${CONFIG.platform || '-'}
   Method: ${CONFIG.method}
   Requests per iteration (N): ${CONFIG.n}
   Cache Strategy: ${strategy}

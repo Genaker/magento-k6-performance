@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseConfig, singleScenario } from '../lib/config.js';
+import { parseConfig } from '../lib/config.js';
+import { singleScenario } from '../lib/sources/single.js';
 
 const URL = 'https://shop.test/product.html';
 
@@ -44,7 +45,6 @@ test('plan mode', () => {
   assert.equal(c.mode, 'plan');
   assert.equal(c.plan, 'plans/p.yml');
   assert.equal(c.site, 'flux');
-  assert.throws(() => parseConfig({ PLAN: 'p.yml', PLATFORM: 'flux', PROFILE: 'x.json' }), /PROFILE is for CSV mode/);
 });
 
 test('URL must be http(s)', () => {
@@ -96,8 +96,7 @@ test('platform options', () => {
   assert.equal(parseConfig({ URL }).platform, undefined);
 });
 
-test('PROFILE needs PLATFORM; PLATFORM must be a simple word', () => {
-  assert.throws(() => parseConfig({ CSV: 'x.csv', PROFILE: 'p.json' }), /PROFILE needs -e PLATFORM/);
+test('PLATFORM must be a simple word (PROFILE rules are per format: test/sources.test.js)', () => {
   assert.throws(() => parseConfig({ CSV: 'x.csv', PLATFORM: 'Luma Theme' }), /PLATFORM must be/);
   assert.doesNotThrow(() => parseConfig({ CSV: 'x.csv', PLATFORM: 'luma' })); // overrides only, no profile
 });

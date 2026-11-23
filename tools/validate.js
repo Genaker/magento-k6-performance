@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Pre-flight check for a scenario CSV against a real site, before a load test:
+// Pre-flight check for a scenario plan or CSV against a real site, before a load test:
 // every row is requested once as a cache hit (bare URL) and once busted, plus
 // the platform's follow-up calls, and each response must be 2xx/3xx and
 // contain its `expect` text. Uses the same lib/ code as magento.js, so it
@@ -12,15 +12,14 @@
 //
 // Options also read the k6 env names (PLAN, SITE, SITES, CSV, BASE_URL,
 // PLATFORM, PROFILE, TERMS, API_BASE, BUST_KEY); --base/--api-base override a
-// plan's site. Exit code 1 if anything fails.
+// plan's site. The format is handled by the same lib/sources adapters k6 uses.
+// Exit code 1 if anything fails.
 import { readFileSync } from 'node:fs';
-import { parseCsv } from '../lib/csv.js';
-import { normalizeScenarios, scenariosUse } from '../lib/scenarios.js';
-import { parseTerms } from '../lib/template.js';
-import { parsePlatformProfile } from '../lib/platform.js';
+import { scenariosUse } from '../lib/scenarios.js';
 import { buildPageView, validatePlan } from '../lib/pageview.js';
 import { isErrorStatus } from '../lib/cache.js';
-import { parsePlanText, applySitesText, planEnv, planRows, planProfile, planTermsSource } from '../lib/plan.js';
+import { parseConfig } from '../lib/config.js';
+import { openSource } from '../lib/sources/index.js';
 
 function args(argv) {
   const out = {};
@@ -36,43 +35,32 @@ function args(argv) {
 }
 
 const a = args(process.argv.slice(2));
-const env = process.env;
-const planPath = a.plan || env.PLAN;
-const sitesPath = a.sites || env.SITES;
-let plan = planPath ? parsePlanText(readFileSync(planPath, 'utf8'), planPath) : null;
-if (plan && sitesPath) plan = applySitesText(plan, readFileSync(sitesPath, 'utf8'), sitesPath);
-// Same precedence as k6: plan/site values, then env, then command-line flags.
-const penv = plan ? planEnv(plan, { ...(a.site || env.SITE ? { SITE: a.site || env.SITE } : {}) }) : {};
-const opt = {
-  csv: a.csv || env.CSV,
-  base: a.base || env.BASE_URL || penv.BASE_URL,
-  platform: a.platform || env.PLATFORM || penv.PLATFORM,
-  profile: a.profile || env.PROFILE,
-  terms: a.terms || env.TERMS,
-  apiBase: a['api-base'] || env.API_BASE || penv.API_BASE,
-  bustKey: env.BUST_KEY || penv.BUST_KEY || 'fpc',
-  allTerms: Boolean(a['all-terms']),
-  concurrency: Number(a.concurrency || 4),
-  timeout: Number(a.timeout || 45000),
-};
-if (!plan && !opt.csv) {
+// Same precedence as k6: source (plan/site) values, then env, then flags.
+const ENV_KEYS = ['PLAN', 'SITE', 'SITES', 'CSV', 'BASE_URL', 'PLATFORM', 'PROFILE', 'TERMS', 'API_BASE', 'BUST_KEY'];
+const FLAGS = { plan: 'PLAN', site: 'SITE', sites: 'SITES', csv: 'CSV', base: 'BASE_URL', platform: 'PLATFORM', profile: 'PROFILE', terms: 'TERMS', 'api-base': 'API_BASE' };
+const env = {};
+for (const k of ENV_KEYS) if (process.env[k]) env[k] = process.env[k];
+for (const f in FLAGS) if (typeof a[f] === 'string') env[FLAGS[f]] = a[f];
+if (!env.PLAN && !env.CSV) {
   console.error('usage: node tools/validate.js --plan <plan.yml> --site <name> [--sites <sites.yml>] [--all-terms]\n' +
     '   or: node tools/validate.js --csv <file> --base <https://site> [--platform p --profile f] [--terms f] [--api-base url] [--all-terms]');
   process.exit(2);
 }
+const source = openSource(env, (p) => readFileSync(p, 'utf8'));
+const cfg = parseConfig(source.env);
+const opt = {
+  base: cfg.baseUrl,
+  platform: cfg.platform,
+  apiBase: cfg.apiBase,
+  bustKey: cfg.bustKey,
+  allTerms: Boolean(a['all-terms']),
+  concurrency: Number(a.concurrency || 4),
+  timeout: Number(a.timeout || 45000), // milliseconds
+};
 
-const rows = plan ? planRows(plan) : parseCsv(readFileSync(opt.csv, 'utf8'));
-const scenarios = normalizeScenarios(rows, { baseUrl: opt.base, platform: opt.platform });
-let terms = [];
-if (opt.terms) terms = parseTerms(readFileSync(opt.terms, 'utf8'));
-else if (plan) {
-  const src = planTermsSource(plan, planPath);
-  if (src && src.inline) terms = src.inline;
-  if (src && src.file) terms = parseTerms(readFileSync(src.file, 'utf8'));
-}
-let calls = null;
-if (plan && plan.platforms && opt.platform) calls = parsePlatformProfile(planProfile(plan), opt.platform);
-else if (opt.profile) calls = parsePlatformProfile(JSON.parse(readFileSync(opt.profile, 'utf8')), opt.platform);
+const scenarios = source.scenarios({ ...cfg, cacheHit: undefined }); // validate always sends hit + miss
+const terms = source.terms(cfg);
+const calls = source.calls(cfg);
 validatePlan(scenarios, { terms, bustKey: opt.bustKey, calls, baseUrl: opt.base, apiBase: opt.apiBase });
 
 // Build the request plan: hit + miss for each row; for {term} rows every term (--all-terms) or the first one.
@@ -127,7 +115,7 @@ results.sort((x, y) => requests.indexOf(x.item) - requests.indexOf(y.item));
 let failures = 0;
 let flaky = 0;
 const fmt = (r) => r.error ? `ERR ${r.error}` : `${r.status}${r.missing ? ' (missing expected text)' : ''} ${r.ms}ms${r.retried ? ' [retried]' : ''}`;
-console.log(`Validating ${planPath || opt.csv} on ${opt.base || '(absolute urls)'}${opt.platform ? ` as ${opt.platform}` : ''}: ${requests.length} page views\n`);
+console.log(`Validating ${source.label(cfg, scenarios.length)} on ${opt.base || '(absolute urls)'}${opt.platform ? ` as ${opt.platform}` : ''}: ${requests.length} page views\n`);
 for (const { item, page, callResults } of results) {
   const label = `${item.s.name}${item.term !== undefined ? ` [${item.term}]` : ''} ${item.wantHit ? 'hit ' : 'miss'}`;
   const callBad = callResults.filter(({ r }) => !r.ok);

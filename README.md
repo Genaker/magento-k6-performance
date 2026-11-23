@@ -449,7 +449,19 @@ The toolkit has two test layers. Both run in GitHub Actions on every push and pu
 
 ## Unit tests (Node, no k6 needed)
 
-All logic lives in `lib/` as plain JavaScript that runs in both k6 and Node: plan and CSV parsing, page weighting, cache-hit decisions, cache busting, sub-request building, cache detection, load profiles and thresholds. `magento.js` only wires it to k6. (`lib/vendor/js-yaml.js` is the vendored YAML parser, MIT.)
+All logic lives in `lib/` as plain JavaScript that runs in both k6 and Node: page weighting, cache-hit decisions, cache busting, sub-request building, cache detection, load profiles and thresholds. `magento.js` only wires it to k6. (`lib/vendor/js-yaml.js` is the vendored YAML parser, MIT.)
+
+### Input formats are adapters (`lib/sources/`)
+
+Each input format has its own adapter, and nothing outside `lib/sources/` knows which format it is reading:
+
+| Adapter | Picked by | Format-specific parts |
+|---|---|---|
+| `lib/sources/yaml.js` | `-e PLAN=plans/x.yml` | YAML parsing and key checks, `sites` / `SITE` / `SITES`, `load` / `thresholds` / `options` merged under `-e` values, `platforms`, `search_terms(_file)` |
+| `lib/sources/csv.js` | `-e CSV=pages.csv` | CSV parser, `PROFILE` JSON with sub-requests (needs `PLATFORM`) |
+| `lib/sources/single.js` | `-e URL=https://...` | one page, `FPC=ON` (always cached) or `FPC=OFF` (always busted) |
+
+`lib/sources/index.js` picks the adapter and gives `magento.js` and `tools/validate.js` one interface: `env` (settings), `scenarios(cfg)`, `calls(cfg)` (sub-requests for the platform), `terms(cfg)` (`-e TERMS` wins) and `label()`. Every format produces the same row shape (`name, type, url, url_<platform>, expect, expect_<platform>, cache_hit_pct, traffic_pct`), so weighting, busting and sub-requests run through one tested path. To add a format, write an adapter with `kind`, `claims(env)` and `open(env, readFile)` and list it in `SOURCES`.
 
 ```bash
 npm test            # = node --test test/*.test.js  (Node >= 20, no npm install needed)
@@ -457,18 +469,19 @@ npm test            # = node --test test/*.test.js  (Node >= 20, no npm install 
 
 | File | Covers |
 |---|---|
-| `test/plan.test.js` | YAML plans: settings → options, `-e` precedence, sites/`SITE`/`SITES`, per-platform url/expect, typo detection, terms |
-| `test/sample-data.test.js` | `plans/sample-data.yml` is valid for every site; 20% search / 32% categories / 32% products; Luma only logs search terms (no banner AJAX), Flux 2 GraphQL calls, Hyvä none |
+| `test/sources.test.js` | adapter picked from env; **the same pages as CSV and as YAML give identical scenarios and sub-requests**; per-format rules (`PROFILE` only with CSV + `PLATFORM`, `SITES`, terms sources), lazy file reads, `CACHE_HIT` in every format |
+| `test/plan.test.js` | YAML plans (`lib/sources/yaml.js`): settings → options, `-e` precedence, sites/`SITE`/`SITES`, per-platform url/expect, typo detection, terms |
+| `test/sample-data.test.js` | `plans/sample-data.yml` is valid for every site; 20% search / 32% categories / 32% products; Luma only logs search terms (no banner AJAX), Flux 1 GraphQL call per search (`flux.asis` 2), Hyvä none |
 | `test/pageview.test.js` | page + sub-request URLs, `{placeholders}`, busting a miss end to end, fail-fast validation |
 | `test/platform.test.js` | sub-request profiles: `"*"` + per type, headers, validation |
 | `test/template.test.js` | placeholders, browser-style term encoding (`yoga+mat`), terms files |
 | `test/config.test.js` | PLAN/CSV/URL modes, lowercase env names, validation of `N`, `SLEEP`, `FPC`, `BUST_KEY`, `PLATFORM` |
-| `test/csv.test.js` | CSV quoting, CRLF/BOM, comments, real line numbers in errors |
+| `test/csv.test.js` | CSV parser (`lib/sources/csv.js`): quoting, CRLF/BOM, comments, real line numbers in errors |
 | `test/scenarios.test.js` | traffic weights, `type`, per-platform overrides, `-` rows, traffic and hit-ratio distribution (seeded RNG, 200k draws) |
 | `test/url.test.js` | `?`/`&`/`#fragment` handling, unique tokens |
 | `test/cache.test.js` | Magento / Fastly / Cloudflare / `Age` detection, error statuses |
 | `test/profile.test.js` | `MODE` executors, thresholds, CLI-compatible defaults |
-| `test/k6-script.test.js` | `magento.js` imports resolve, `lib/` has no k6/Node deps or too-new syntax, no dead code |
+| `test/k6-script.test.js` | `magento.js` imports resolve, `lib/` and `lib/sources/` have no k6/Node deps or too-new syntax, no dead code |
 
 ## Smoke load test (k6 + mock Magento)
 

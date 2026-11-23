@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { parsePlanText, planEnv, planRows, planProfile, planTermsSource } from '../lib/plan.js';
+import { parsePlanText, planEnv, planRows, planProfile, planTermsSource } from '../lib/sources/yaml.js';
 import { normalizeScenarios } from '../lib/scenarios.js';
 import { parseTerms } from '../lib/template.js';
 import { parsePlatformProfile } from '../lib/platform.js';

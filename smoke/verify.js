@@ -7,7 +7,7 @@
 //   node smoke/verify.js calls-magento  <base> <expectedPages>
 //   node smoke/verify.js calls-headless <base> <expectedPages>
 import { readFileSync } from 'node:fs';
-import { parseCsv } from '../lib/csv.js';
+import { parseCsv } from '../lib/sources/csv.js';
 import { normalizeScenarios } from '../lib/scenarios.js';
 import { parseTerms } from '../lib/template.js';
 import { pageKey, isCacheable } from './key.js';
