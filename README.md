@@ -332,6 +332,7 @@ All are `-e NAME=value`; names are case-insensitive (`-e url=` = `-e URL=`). In 
 | `PROFILE` | CSV mode: JSON with per-platform sub-requests (`{"platforms": {...}}`) | – |
 | `TERMS` | Search-terms file for `{term}` (one per line); overrides the plan's terms | – |
 | `METHOD` | HTTP method | `GET` |
+| `TIMEOUT` | Per-request timeout for pages and sub-requests (`60s`, `2m`, `90000ms`). A request still running after this counts as an error with status 0 | `60s` (k6 default) |
 | `N` | Requests per VU iteration | `1` |
 | `SLEEP` | Pause after each request (s) | `0` |
 | `FPC` | Single-page mode: `ON` = use the cache, `OFF` = bust every request | `OFF` |

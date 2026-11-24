@@ -118,3 +118,10 @@ test('PLATFORM accepts a variant like flux.min', () => {
   assert.equal(parseConfig({ CSV: 'x.csv', PLATFORM: 'flux.min' }).platform, 'flux.min');
   assert.throws(() => parseConfig({ CSV: 'x.csv', PLATFORM: 'flux.min.x' }), /PLATFORM must be/);
 });
+
+test('TIMEOUT defaults to k6\'s 60s, accepts ms/s/m, rejects junk', () => {
+  assert.equal(parseConfig({ URL }).timeout, '60s');
+  assert.equal(parseConfig({ URL, TIMEOUT: '2m' }).timeout, '2m');
+  assert.equal(parseConfig({ URL, TIMEOUT: '90000ms' }).timeout, '90000ms');
+  assert.throws(() => parseConfig({ URL, TIMEOUT: '2 minutes' }), /TIMEOUT must look like/);
+});

@@ -154,6 +154,7 @@ export default function () {
     const res = http.request(CONFIG.method, view.url, null, {
       headers: headers,
       tags: tags,
+      timeout: CONFIG.timeout,
       responseType: view.expect ? 'text' : 'none',
     });
     const httpFailed = isErrorStatus(res.status);
@@ -192,6 +193,7 @@ export default function () {
           params: {
             headers: Object.assign({}, headers, c.headers),
             tags: Object.assign({}, tags, { call: c.name, name: `${s.type}:${c.name}` }),
+            timeout: CONFIG.timeout,
             responseType: c.expect ? 'text' : 'none',
           },
         };
